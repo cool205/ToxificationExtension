@@ -1,14 +1,12 @@
 {
     "name": "Toxicity Changer Extension",
     "version": "1.0",
-    "background": {
-        "service_worker": "background.js"
-    },
     "content_scripts": [
         {
             "js": [
                 "content.js"
             ],
+            "type": "module",
             "matches": [
                 "<all_urls>"
             ]
