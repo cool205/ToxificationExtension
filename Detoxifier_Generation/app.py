@@ -14,7 +14,7 @@ model.eval()
 
 def generate_response(toxic_input):
     print("Starting generation…")
-    prompt = f"Make this sentence kind and respectful. Keep it short and polite:\n{toxic_input}"
+    prompt = f"Toxic Version: {toxic_input}\nNeutral Version:"
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     print("Inputs ready:", inputs.input_ids.shape)
 
@@ -32,7 +32,16 @@ def generate_response(toxic_input):
         )
 
     decoded = tokenizer.decode(output[0], skip_special_tokens=True)
-    print("Decoded output:", decoded)
+
+    # Extract only the first neutral sentence
+    if "Neutral Version:" in decoded:
+        response = decoded.split("Neutral Version:")[-1].strip().split("\n")[0]
+    else:
+        response = decoded.strip().split("\n")[0]
+
+    # Remove any trailing junk
+    for stop_phrase in ["Positive Version:", "Toxic Version:", "You can also"]:
+        response = response.split(stop_phrase)[0].strip()
 
     # Extract only the rewritten part
     if "Rewritten:" in decoded:
@@ -45,7 +54,7 @@ def generate_response(toxic_input):
 
 # Store feedback
 def save_feedback(toxic_input, detox_response, rating):
-    prompt = f"[INST] Rewrite the following toxic sentence in a kind and respectful way:\n{toxic_input} [/INST] Response: {detox_response}"
+    prompt = f"Toxic Version: {toxic_input}\nNeutral Version: {detox_response}"
     feedback = {
         "text": prompt,
         "rating": int(rating)
