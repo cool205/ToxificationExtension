@@ -14,7 +14,7 @@ model.eval()
 
 def generate_response(toxic_input):
     print("Starting generation…")
-    prompt = f"Rewrite the following sentence to be kind and respectful:\n{toxic_input}\nRewritten:"
+    prompt = f"Make this sentence kind and respectful. Keep it short and polite:\n{toxic_input}"
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     print("Inputs ready:", inputs.input_ids.shape)
 
