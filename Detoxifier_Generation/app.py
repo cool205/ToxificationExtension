@@ -1,37 +1,59 @@
 from flask import Flask, request, jsonify, render_template
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import json
 import os
 
 app = Flask(__name__)
 
-# Load model and tokenizer
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-tokenizer.add_special_tokens({'pad_token': '[PAD]', 'additional_special_tokens': ['<TOXIC>', '<POSITIVE>']})
-model = GPT2LMHeadModel.from_pretrained("gpt2")
-model.resize_token_embeddings(len(tokenizer))
-model.eval()  # Set model to evaluation mode
+# Load LLaMA 2 model and tokenizer
+model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+model.eval()
 
-# Generate detoxified response
 def generate_response(toxic_input):
-    prompt = f"Rewrite the following toxic sentence in a kind and respectful way:\n{toxic_input}\nResponse:"
-    input_ids = tokenizer(prompt, return_tensors="pt", padding=True).input_ids
+    print("Starting generation…")
+    prompt = f"Rewrite the following sentence to be kind and respectful:\n{toxic_input}\nRewritten:"
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    print("Inputs ready:", inputs.input_ids.shape)
+
+    input_length = inputs.input_ids.shape[1]
+    target_length = min(input_length + 5, 50)
+
     with torch.no_grad():
-        output = model.generate(input_ids, max_length=64, pad_token_id=tokenizer.pad_token_id)
-    response = tokenizer.decode(output[0], skip_special_tokens=True)
+        output = model.generate(
+            **inputs,
+            max_new_tokens=target_length,
+            temperature=0.7,
+            top_p=0.9,
+            do_sample=True,
+            pad_token_id=tokenizer.pad_token_id
+        )
+
+    decoded = tokenizer.decode(output[0], skip_special_tokens=True)
+    print("Decoded output:", decoded)
+
+    # Extract only the rewritten part
+    if "Rewritten:" in decoded:
+        response = decoded.split("Rewritten:")[-1].strip().split("\n")[0]
+    else:
+        response = decoded.strip().split("\n")[-1]
+
+    print("Generated:", response)
     return response
 
 # Store feedback
 def save_feedback(toxic_input, detox_response, rating):
+    prompt = f"[INST] Rewrite the following toxic sentence in a kind and respectful way:\n{toxic_input} [/INST] Response: {detox_response}"
     feedback = {
-        "input": toxic_input,
-        "response": detox_response,
-        "rating": rating
+        "text": prompt,
+        "rating": int(rating)
     }
     os.makedirs("feedback", exist_ok=True)
-    with open("feedback/ratings.json", "a") as f:
+    with open("feedback/train.jsonl", "a") as f:
         f.write(json.dumps(feedback) + "\n")
+
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -50,4 +72,4 @@ def rate():
     return "Thanks for your feedback!"
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
