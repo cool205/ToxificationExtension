@@ -1,0 +1,31 @@
+# Ignore Python virtual environments
+venv/
+.env/
+__pycache__/
+
+# Ignore model weights and checkpoints
+*.safetensors
+*.pt
+*.bin
+*.ckpt
+
+# Ignore Hugging Face cache and datasets
+~/.cache/
+~/.huggingface/
+datasets/
+cache/
+
+# Ignore large logs or outputs
+*.log
+*.csv
+*.jsonl
+*.npy
+*.npz
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore temporary files
+*.tmp
+*.swp
+.DS_Store
