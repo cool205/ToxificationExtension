@@ -1,30 +1,27 @@
 from flask import Flask, request, jsonify, render_template
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 import json
 import os
 
 app = Flask(__name__)
 
-# Load LLaMA 2 model and tokenizer
-model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+# Load ParaGeDi model and tokenizer
+model_name = "s-nlp/bart-base-detox"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
 model.eval()
 
+# Detoxification with ParaGeDi
 def generate_response(toxic_input):
-    print("Starting generation…")
-    prompt = f"Toxic Version: {toxic_input}\nNeutral Version:"
+    prompt = f"Toxic: {toxic_input}\nNeutral:"
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    print("Inputs ready:", inputs.input_ids.shape)
-
-    input_length = inputs.input_ids.shape[1]
-    target_length = min(input_length + 5, 50)
 
     with torch.no_grad():
         output = model.generate(
             **inputs,
-            max_new_tokens=target_length,
+            max_new_tokens=50,
             temperature=0.7,
             top_p=0.9,
             do_sample=True,
@@ -32,24 +29,7 @@ def generate_response(toxic_input):
         )
 
     decoded = tokenizer.decode(output[0], skip_special_tokens=True)
-
-    # Extract only the first neutral sentence
-    if "Neutral Version:" in decoded:
-        response = decoded.split("Neutral Version:")[-1].strip().split("\n")[0]
-    else:
-        response = decoded.strip().split("\n")[0]
-
-    # Remove any trailing junk
-    for stop_phrase in ["Positive Version:", "Toxic Version:", "You can also"]:
-        response = response.split(stop_phrase)[0].strip()
-
-    # Extract only the rewritten part
-    if "Rewritten:" in decoded:
-        response = decoded.split("Rewritten:")[-1].strip().split("\n")[0]
-    else:
-        response = decoded.strip().split("\n")[-1]
-
-    print("Generated:", response)
+    response = decoded.split("Neutral:")[-1].strip().split("\n")[0]
     return response
 
 # Store feedback
@@ -62,7 +42,6 @@ def save_feedback(toxic_input, detox_response, rating):
     os.makedirs("feedback", exist_ok=True)
     with open("feedback/train.jsonl", "a") as f:
         f.write(json.dumps(feedback) + "\n")
-
 
 @app.route("/", methods=["GET", "POST"])
 def home():
