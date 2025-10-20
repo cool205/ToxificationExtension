@@ -21,7 +21,7 @@ def generate_response(toxic_input):
     with torch.no_grad():
         output = model.generate(
             **inputs,
-            max_new_tokens=50,
+            max_new_tokens=min(int(len(toxic_input) * 1.2), 100),
             temperature=0.7,
             top_p=0.9,
             do_sample=True,
