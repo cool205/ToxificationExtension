@@ -38,8 +38,7 @@ training_args = TrainingArguments(
     logging_dir="./logs",
     save_steps=500,
     save_total_limit=2,
-    fp16=torch.cuda.is_available(),  # Mixed precision training if supported
-    evaluation_strategy="no"
+    fp16=torch.cuda.is_available()
 )
 
 # Trainer setup

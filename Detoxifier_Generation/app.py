@@ -1,16 +1,36 @@
 from flask import Flask, request, jsonify, render_template
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import AutoConfig,  AutoTokenizer, AutoModelForSeq2SeqLM, BartTokenizer, BartForConditionalGeneration
 import torch
 import json
 import os
+from pathlib import Path
 
 app = Flask(__name__)
 
-# Load ParaGeDi model and tokenizer
-model_name = "s-nlp/bart-base-detox"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
+model_path = r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned"
+
+from transformers import BartTokenizer
+
+tokenizer = BartTokenizer(
+    vocab_file=r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned\checkpoint-21\vocab.json",
+    merges_file=r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned\checkpoint-21\merges.txt"
+)
+
+model_path = r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned\checkpoint-21"
+
+config = AutoConfig.from_pretrained(model_path, local_files_only=True)
+
+model = BartForConditionalGeneration.from_pretrained(
+    model_path,
+    config=config,
+    local_files_only=True
+)
+
+
+model.to("cuda" if torch.cuda.is_available() else "cpu")
+
+
 model.eval()
 
 # Detoxification with ParaGeDi
@@ -18,7 +38,7 @@ def generate_response(toxic_input):
     prompt = f"Toxic: {toxic_input}\nNeutral:"
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-    with torch.no_grad():
+    with torch.no_grad(): 
         output = model.generate(
             **inputs,
             max_new_tokens=min(int(len(toxic_input) * 1.2), 100),
