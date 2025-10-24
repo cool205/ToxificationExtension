@@ -1,6 +1,14 @@
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "logDetox") {
-    // Relay to popup
-    chrome.runtime.sendMessage(message);
+let detoxLog = [];
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "logDetox") {
+    detoxLog.push(msg.payload);
+    console.log("Log updated:", detoxLog);
+  }
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "getDetoxLog") {
+    sendResponse({ detoxLog });
   }
 });

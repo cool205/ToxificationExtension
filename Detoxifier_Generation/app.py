@@ -1,44 +1,25 @@
 from flask import Flask, request, jsonify, render_template
-from transformers import AutoConfig,  AutoTokenizer, AutoModelForSeq2SeqLM, BartTokenizer, BartForConditionalGeneration
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
+from pathlib import Path
 import json
 import os
-from pathlib import Path
 
 app = Flask(__name__)
 
-
-model_path = r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned"
-
-from transformers import BartTokenizer
-
-tokenizer = BartTokenizer(
-    vocab_file=r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned\checkpoint-21\vocab.json",
-    merges_file=r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned\checkpoint-21\merges.txt"
-)
-
-model_path = r"C:\Users\Wilso\OneDrive\Desktop\ToxificationExtension\Detoxifier_Generation\paragedi-detox-finetuned\checkpoint-21"
-
-config = AutoConfig.from_pretrained(model_path, local_files_only=True)
-
-model = BartForConditionalGeneration.from_pretrained(
-    model_path,
-    config=config,
-    local_files_only=True
-)
-
-
+# Load fine-tuned T5 model
+model_path = Path(__file__).parent / "t5-small-detox-finetuned"
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
 model.to("cuda" if torch.cuda.is_available() else "cpu")
-
-
 model.eval()
 
-# Detoxification with ParaGeDi
+# Detoxification function
 def generate_response(toxic_input):
-    prompt = f"Toxic: {toxic_input}\nNeutral:"
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-
-    with torch.no_grad(): 
+    # For T5, prefix is usually "detoxify: "
+    prompt = f"Toxic Version: {toxic_input}\nNeutral Version:"
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, padding="max_length", max_length=512).to(model.device)
+    with torch.no_grad():
         output = model.generate(
             **inputs,
             max_new_tokens=min(int(len(toxic_input) * 1.2), 100),
@@ -47,22 +28,20 @@ def generate_response(toxic_input):
             do_sample=True,
             pad_token_id=tokenizer.pad_token_id
         )
-
     decoded = tokenizer.decode(output[0], skip_special_tokens=True)
-    response = decoded.split("Neutral:")[-1].strip().split("\n")[0]
-    return response
+    return decoded.strip()
 
-# Store feedback
+# Feedback saving
 def save_feedback(toxic_input, detox_response, rating):
-    prompt = f"Toxic Version: {toxic_input}\nNeutral Version: {detox_response}"
     feedback = {
-        "text": prompt,
+        "text": f"Toxic Version: {toxic_input}\nNeutral Version: {detox_response}",
         "rating": int(rating)
     }
     os.makedirs("feedback", exist_ok=True)
     with open("feedback/train.jsonl", "a") as f:
         f.write(json.dumps(feedback) + "\n")
 
+# Routes
 @app.route("/", methods=["GET", "POST"])
 def home():
     detox_response = ""

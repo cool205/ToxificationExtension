@@ -6,7 +6,7 @@ body {
         margin-bottom: 10px;
       }
       table {
-        width: 100%;
+        width: 200%;
         border-collapse: collapse;
       }
       th, td {
@@ -20,3 +20,8 @@ body {
       thead {
         background-color: #f9f9f9;
       }
+html, body {
+  min-width: 400px;
+  min-height: 500px;
+  max-height: 700px;
+}

@@ -1,54 +1,87 @@
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, Trainer, TrainingArguments, DataCollatorForSeq2Seq
-from datasets import load_dataset
 import torch
+import pandas as pd
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    TrainerCallback
+)
 
-# Load ParaGeDi detox model
-model_name = "s-nlp/bart-base-detox"
+# === Confirm GPU availability ===
+print("Using GPU:", torch.cuda.is_available())
+
+# === Custom callback to log metrics ===
+class MetricsLoggerCallback(TrainerCallback):
+    def __init__(self, log_path="metrics_log.txt"):
+        self.log_path = log_path
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None:
+            return
+        with open(self.log_path, "a") as f:
+            if "loss" in logs:
+                f.write(f"Step {state.global_step} - Loss: {logs['loss']:.4f}\n")
+            if "eval_accuracy" in logs:
+                f.write(f"Step {state.global_step} - Accuracy: {logs['eval_accuracy']:.4f}\n")
+
+# === Load model and tokenizer ===
+model_name = "t5-small"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
-# Load your dataset
-dataset = load_dataset("json", data_files="feedback/train.jsonl", split="train")
+# === Load and reshape dataset ===
+train_df = pd.read_csv("paradetox.tsv", sep="\t")
+train_df = train_df.dropna(subset=["toxic", "neutral1", "neutral2", "neutral3"])
 
-# Preprocess: extract input (toxic) and target (neutral) from "text" field
-def preprocess(example):
-    text = example["text"]
-    
-    # Check and parse "Toxic Version" and "Neutral Version"
-    if "Toxic Version:" in text and "Neutral Version:" in text:
-        toxic_part = text.split("Toxic Version:")[1].split("Neutral Version:")[0].strip()
-        neutral_part = text.split("Neutral Version:")[1].strip()
-        
-        # Tokenize toxic input and neutral target
-        model_input = tokenizer(toxic_part, truncation=True, padding="max_length", max_length=512)
-        with tokenizer.as_target_tokenizer():
-            model_input["labels"] = tokenizer(neutral_part, truncation=True, padding="max_length", max_length=512)["input_ids"]
-        return model_input
-    else:
-        return {}
-
-# Apply preprocessing
-tokenized_dataset = dataset.map(preprocess, remove_columns=dataset.column_names)
-
-# Training arguments
-training_args = TrainingArguments(
-    output_dir="./paragedi-detox-finetuned",
-    per_device_train_batch_size=2,
-    num_train_epochs=3,
-    logging_dir="./logs",
-    save_steps=500,
-    save_total_limit=2,
-    fp16=torch.cuda.is_available()
+# Reshape to long format: one toxic-neutral pair per row
+train_df_long = train_df.melt(
+    id_vars=["toxic"],
+    value_vars=["neutral1", "neutral2", "neutral3"],
+    var_name="neutral_variant",
+    value_name="neutral"
 )
 
-# Trainer setup
+# Convert to HuggingFace Dataset
+dataset = Dataset.from_pandas(train_df_long)
+
+# === Tokenization ===
+def tokenize_function(examples):
+    inputs = examples["toxic"]
+    targets = examples["neutral"]
+    model_inputs = tokenizer(inputs, max_length=128, truncation=True, padding="max_length")
+    labels = tokenizer(targets, max_length=128, truncation=True, padding="max_length")
+    model_inputs["labels"] = labels["input_ids"]
+    return model_inputs
+
+tokenized_datasets = dataset.map(tokenize_function, batched=True)
+
+# === Data collator for padding ===
+data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+
+# === Training arguments ===
+training_args = TrainingArguments(
+    output_dir="./t5-small-detox-finetuned",
+    learning_rate=5e-5,
+    per_device_train_batch_size=8,
+    weight_decay=0.01,
+    num_train_epochs=3,
+    logging_steps=10,
+    disable_tqdm=True  # disables console progress bar
+)
+
+# === Trainer ===
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=tokenized_dataset,
-    tokenizer=tokenizer,
-    data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+    train_dataset=tokenized_datasets,
+    data_collator=data_collator,
+    callbacks=[MetricsLoggerCallback()]
 )
 
-# Train the model
+# === Train and save ===
 trainer.train()
+trainer.save_model("./t5-small-detox-finetuned")
+tokenizer.save_pretrained("./t5-small-detox-finetuned")

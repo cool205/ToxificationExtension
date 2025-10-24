@@ -1,32 +1,17 @@
-const tableBody = document.getElementById('detoxTableBody');
+chrome.runtime.sendMessage({ type: "getDetoxLog" }, response => {
+  const detoxLog = response.detoxLog || [];
+  const tableBody = document.getElementById('detoxTableBody');
+  tableBody.innerHTML = '';
 
-function addDetoxRow(original, detoxified) {
-  const row = document.createElement('tr');
-
-  const originalCell = document.createElement('td');
-  originalCell.textContent = original;
-
-  const detoxCell = document.createElement('td');
-  detoxCell.textContent = detoxified;
-
-  row.appendChild(originalCell);
-  row.appendChild(detoxCell);
-  tableBody.appendChild(row);
-}
-
-chrome.storage.local.get({ detoxLog: [] }, (data) => {
-  const log = data.detoxLog;
-  if (log.length === 0) {
+  if (detoxLog.length === 0) {
     const row = document.createElement('tr');
-    const cell = document.createElement('td');
-    cell.colSpan = 2;
-    cell.textContent = "No detoxified messages yet.";
-    cell.style.textAlign = "center";
-    row.appendChild(cell);
+    row.innerHTML = `<td colspan="2" style="text-align:center">No detoxified messages yet.</td>`;
     tableBody.appendChild(row);
   } else {
-    log.forEach(entry => {
-      addDetoxRow(entry.original, entry.detoxified);
+    detoxLog.forEach(({ original, detoxified }) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${original}</td><td>${detoxified}</td>`;
+      tableBody.appendChild(row);
     });
   }
 });
