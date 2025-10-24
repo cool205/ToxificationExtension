@@ -17,7 +17,7 @@ model.eval()
 # Detoxification function
 def generate_response(toxic_input):
     # For T5, prefix is usually "detoxify: "
-    prompt = f"Toxic Version: {toxic_input}\nNeutral Version:"
+    prompt = f"detoxify: {toxic_input}"
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, padding="max_length", max_length=512).to(model.device)
     with torch.no_grad():
         output = model.generate(
