@@ -67,9 +67,9 @@ training_args = TrainingArguments(
     learning_rate=5e-5,
     per_device_train_batch_size=8,
     weight_decay=0.01,
-    num_train_epochs=3,
+    num_train_epochs=5,
     logging_steps=10,
-    disable_tqdm=True  # disables console progress bar
+    disable_tqdm=False  # disables console progress bar
 )
 
 # === Trainer ===
