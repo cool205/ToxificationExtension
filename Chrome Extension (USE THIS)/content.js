@@ -50,10 +50,87 @@ const tokenize = text =>
 const classify = text =>
   tokenize(text).some(token => toxicKeywords.includes(token)) ? "toxic" : "clean";
 
-const detoxify = async text =>
-  text.replace(/\b(hate|kill|stupid|idiot|ugly|trash)\b/gi, match =>
-    replacements[match.toLowerCase()] || match
-  );
+// Replace the keyword-based detoxify with a remote detoxifier call.
+// This sends the full text to the background worker which queries the Space.
+// Batching configuration
+const BATCH_SIZE = 8;
+const BATCH_DELAY_MS = 800;
+
+// Internal batching state
+let batchQueue = [];
+let batchTimer = null;
+let requestIdCounter = 1;
+
+// Prevent re-processing the same block
+const markDetoxified = (el) => { if (el && el.dataset) el.dataset.detoxified = '1'; };
+const isAlreadyDetoxified = (el) => el && el.dataset && el.dataset.detoxified === '1';
+
+const flushBatch = () => {
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+  }
+  if (batchQueue.length === 0) return;
+
+  const items = batchQueue.splice(0, batchQueue.length);
+  const texts = items.map(i => i.text);
+
+  chrome.runtime.sendMessage({ type: 'detoxifyText', texts }, (response) => {
+    if (!response) {
+      console.error('No response from background for batch');
+      return;
+    }
+    if (!response.success) {
+      console.error('Batch detox failed:', response.error);
+      // On failure, we can optionally fallback to simple keyword replacement
+    }
+
+    const outputs = response.outputs || [];
+    items.forEach((it, idx) => {
+      const out = outputs[idx] && outputs[idx].length > 0 ? outputs[idx] : it.text;
+      try {
+        const span = document.createElement('span');
+        span.textContent = out;
+        span.style.backgroundColor = '#ffffcc';
+
+        const parent = it.nodes[0] && it.nodes[0].parentNode;
+        if (parent) {
+          it.nodes.forEach(n => n.parentNode?.removeChild(n));
+          parent.appendChild(span);
+          markDetoxified(parent);
+
+          chrome.runtime.sendMessage({
+            type: "logDetox",
+            payload: {
+              original: it.text,
+              detoxified: out,
+              timestamp: new Date().toISOString()
+            }
+          });
+          updateDetoxBadge(1);
+        }
+      } catch (err) {
+        console.error('Error applying detoxified text for item', it, err);
+      }
+    });
+  });
+};
+
+const enqueueForDetox = (nodes, text) => {
+  // Skip if parent block already detoxified
+  const parent = nodes[0] && nodes[0].parentNode;
+  if (isAlreadyDetoxified(parent)) return;
+
+  const id = requestIdCounter++;
+  batchQueue.push({ id, nodes, text });
+
+  if (batchQueue.length >= BATCH_SIZE) {
+    flushBatch();
+  } else {
+    if (batchTimer) clearTimeout(batchTimer);
+    batchTimer = setTimeout(() => flushBatch(), BATCH_DELAY_MS);
+  }
+};
 
 const isVisible = el => {
   if (!(el instanceof HTMLElement)) return false;
@@ -105,31 +182,8 @@ const processTextBlock = async (item) => {
   const label = classify(originalText);
   if (label !== "toxic") return;
 
-  try {
-    const detoxified = await detoxify(originalText);
-    const span = document.createElement('span');
-    span.textContent = detoxified;
-    span.style.backgroundColor = '#ffffcc';
-
-    const parent = nodes[0].parentNode;
-    if (parent) {
-      nodes.forEach(n => n.parentNode?.removeChild(n));
-      parent.appendChild(span);
-    }
-
-    chrome.runtime.sendMessage({
-      type: "logDetox",
-      payload: {
-        original: originalText,
-        detoxified,
-        timestamp: new Date().toISOString()
-      }
-    });
-    detoxCount++;
-    updateDetoxBadge(detoxCount);
-  } catch (err) {
-    console.error("❌ Detoxification failed:", err, item);
-  }
+    // enqueue for batched detoxification
+    enqueueForDetox(nodes, originalText);
 };
 
 scanBlockElements();
