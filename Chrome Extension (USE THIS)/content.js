@@ -341,7 +341,7 @@ const isVisible = el => {
 
 const scanBlockElements = (root = document.body) => {
   createDetoxBadge();
-  console.log("🔁 Scanning for text blocks...");
+  console.log("Scanning for text blocks...");
   
   // Get all text-containing elements
   const walker = document.createTreeWalker(
@@ -358,7 +358,7 @@ const scanBlockElements = (root = document.body) => {
 
         // Only filter by length
         const len = text.length;
-        if (len < 10 || len > 1000) return NodeFilter.FILTER_REJECT;
+        if (len < 20 || len > 1000) return NodeFilter.FILTER_REJECT;
 
         return NodeFilter.FILTER_ACCEPT;
       }
@@ -377,7 +377,7 @@ const scanBlockElements = (root = document.body) => {
     // Start new group if parent changed
     if (parent !== lastParent && currentGroup.length > 0) {
       const text = currentGroup.map(n => n.textContent).join(' ').trim();
-      if (text.length >= 10 && text.length <= 1000) {
+      if (text.length >= 20 && text.length <= 1000) {
         textGroups.set(lastParent, currentGroup.slice());
       }
       currentGroup = [];

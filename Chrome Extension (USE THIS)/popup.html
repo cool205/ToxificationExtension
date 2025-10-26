@@ -68,32 +68,32 @@
 </head>
 <body>
   <h2>
-    Detected Text
-    <button class="clear-btn" id="clearDetected">Clear</button>
+    Changed Text (<span id="changedCount" style="margin: 0 5px">0</span>)
+    <button class="clear-btn" id="clearChanged">Clear & Unhighlight</button>
   </h2>
   <div style="margin-bottom: 20px">
     <table>
       <thead>
         <tr>
-          <th style="width: 100%; background-color: #e6ffed;">Detected Non-Toxic Text</th>
+          <th style="width: 50%; background-color: #ffecec;">Original (Toxic)</th>
+          <th style="width: 50%; background-color: #e6ffed;">Detoxified</th>
         </tr>
       </thead>
-      <tbody id="detectedTableBody"></tbody>
+      <tbody id="detoxTableBody"></tbody>
     </table>
   </div>
 
   <h2>
-    Changed Text
-    <button class="clear-btn" id="clearChanged">Clear</button>
+    Scanned Text (Unchanged) (<span id="detectedCount" style="margin: 0 5px">0</span>)
+    <button class="clear-btn" id="clearDetected">Clear & Unhighlight</button>
   </h2>
   <table>
     <thead>
       <tr>
-        <th style="width: 50%; background-color: #ffecec;">Original (Toxic)</th>
-        <th style="width: 50%; background-color: #e6ffed;">Detoxified</th>
+        <th style="width: 100%; background-color: #e6ffed;">Non-Toxic Text</th>
       </tr>
     </thead>
-    <tbody id="detoxTableBody"></tbody>
+    <tbody id="detectedTableBody"></tbody>
   </table>
   <script src="popup.js"></script>
 </body>
