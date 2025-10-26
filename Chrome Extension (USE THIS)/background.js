@@ -1,4 +1,54 @@
 let detoxLog = [];
+let detectedLog = [];
+
+// Configuration
+const CONFIG = {
+  CLASSIFY_ENDPOINT: "https://your-classification-model.hf.space/run/predict",
+  DETOX_ENDPOINT: "https://techkid0109-detoxificationai.hf.space/run/predict",
+  MAX_RETRIES: 3,
+  RETRY_DELAY: 1000,
+  BACKOFF_FACTOR: 1.5
+};
+
+// Utility for delayed retry with exponential backoff
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (err) {
+    if (retries <= 0) throw err;
+    await wait(CONFIG.RETRY_DELAY * Math.pow(CONFIG.BACKOFF_FACTOR, CONFIG.MAX_RETRIES - retries));
+    return fetchWithRetry(url, options, retries - 1);
+  }
+}
+
+// Classify text as toxic or non-toxic with retry logic
+async function classifyText(text) {
+  try {
+    // TODO: Replace mockup with actual API call
+    // For now, use keyword detection but wrapped in retry logic
+    const mockApiCall = async () => {
+      const toxicWords = ["hate", "kill", "stupid", "idiot", "ugly", "trash"];
+      const hasToxic = toxicWords.some(word => 
+        typeof text === 'string' && text.toLowerCase().includes(word)
+      );
+      return { data: [{ toxic: hasToxic }] };
+    };
+
+    // Simulate network call with retry
+    const json = await mockApiCall();
+    return { 
+      success: true, 
+      isToxic: json?.data?.[0]?.toxic ?? false 
+    };
+  } catch (err) {
+    console.error("Classification error:", err);
+    return { success: false, error: String(err) };
+  }
+}
 
 // Single listener handling multiple message types. For async responses, return true.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -9,9 +59,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 
-  if (msg.type === "getDetoxLog") {
-    sendResponse({ detoxLog });
+  if (msg.type === "logDetected") {
+    detectedLog.push(msg.payload);
+    console.log("Detected log updated:", detectedLog);
     return;
+  }
+
+  if (msg.type === "getDetoxLog") {
+    sendResponse({ detoxLog, detectedLog });
+    return;
+  }
+
+  if (msg.type === "clearDetected") {
+    detectedLog.length = 0;
+    sendResponse({ success: true });
+    return;
+  }
+
+  if (msg.type === "clearChanged") {
+    detoxLog.length = 0;
+    sendResponse({ success: true });
+    return;
+  }
+
+  if (msg.type === "classifyText") {
+    (async () => {
+      try {
+        if (Array.isArray(msg.texts)) {
+          // Batch classification
+          const results = await Promise.all(msg.texts.map(classifyText));
+          sendResponse({
+            success: true,
+            results: results.map(r => r.success ? r.isToxic : false)
+          });
+        } else {
+          // Single text classification
+          const result = await classifyText(msg.text);
+          sendResponse({
+            success: true,
+            isToxic: result.success ? result.isToxic : false
+          });
+        }
+      } catch (err) {
+        console.error("Classification error:", err);
+        sendResponse({ success: false, error: String(err) });
+      }
+    })();
+    return true;
   }
 
   if (msg.type === "detoxifyText") {

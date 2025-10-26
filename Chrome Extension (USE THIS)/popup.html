@@ -7,18 +7,37 @@
       padding: 10px;
       width: 600px;
       height: 600px;
-      font-family: sans-serif;
+      font-family: system-ui, -apple-system, sans-serif;
       overflow: auto;
     }
 
     h2 {
       margin-top: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .clear-btn {
+      font-size: 12px;
+      padding: 4px 12px;
+      border: 1px solid #ccc;
+      background: white;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .clear-btn:hover {
+      background: #f0f0f0;
+      border-color: #999;
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
+      margin-bottom: 20px;
     }
 
     th, td {
@@ -27,20 +46,51 @@
       word-wrap: break-word;
       white-space: pre-wrap;
       vertical-align: top;
+      transition: background-color 0.2s;
+    }
+
+    td:hover {
+      filter: brightness(0.95);
     }
 
     th {
       background-color: #f0f0f0;
     }
+    
+    tr[data-text-id] {
+      cursor: pointer;
+    }
+
+    tr[data-text-id]:hover td {
+      filter: brightness(0.95);
+    }
   </style>
 </head>
 <body>
-  <h2>Detoxification Log</h2>
+  <h2>
+    Detected Text
+    <button class="clear-btn" id="clearDetected">Clear</button>
+  </h2>
+  <div style="margin-bottom: 20px">
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 100%; background-color: #e6ffed;">Detected Non-Toxic Text</th>
+        </tr>
+      </thead>
+      <tbody id="detectedTableBody"></tbody>
+    </table>
+  </div>
+
+  <h2>
+    Changed Text
+    <button class="clear-btn" id="clearChanged">Clear</button>
+  </h2>
   <table>
     <thead>
       <tr>
-        <th style="width: 50%">Original Text</th>
-        <th style="width: 50%">Detoxified Text</th>
+        <th style="width: 50%; background-color: #ffecec;">Original (Toxic)</th>
+        <th style="width: 50%; background-color: #e6ffed;">Detoxified</th>
       </tr>
     </thead>
     <tbody id="detoxTableBody"></tbody>

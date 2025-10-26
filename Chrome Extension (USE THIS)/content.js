@@ -34,21 +34,41 @@ const updateDetoxBadge = (count) => {
   }, 3000);
 };
 
-const toxicKeywords = ["hate", "kill", "stupid", "idiot", "ugly", "trash"];
-const replacements = {
-  hate: "dislike",
-  kill: "stop",
-  stupid: "uninformed",
-  idiot: "person",
-  ugly: "unattractive",
-  trash: "unwanted"
+// Check if text is toxic using the classification endpoint
+const classifyText = async (text) => {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'classifyText', text }, (response) => {
+        if (!response) return reject('No response from background worker');
+        if (response.success) {
+          resolve(response.isToxic);
+        } else {
+          reject(response.error || 'Classification failed');
+        }
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
 };
 
-const tokenize = text =>
-  text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
-
-const classify = text =>
-  tokenize(text).some(token => toxicKeywords.includes(token)) ? "toxic" : "clean";
+// Batch classify multiple texts
+const classifyTexts = async (texts) => {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'classifyText', texts }, (response) => {
+        if (!response) return reject('No response from background worker');
+        if (response.success) {
+          resolve(response.results);
+        } else {
+          reject(response.error || 'Classification failed');
+        }
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
 
 // Replace the keyword-based detoxify with a remote detoxifier call.
 // This sends the full text to the background worker which queries the Space.
@@ -60,12 +80,145 @@ const BATCH_DELAY_MS = 800;
 let batchQueue = [];
 let batchTimer = null;
 let requestIdCounter = 1;
+// Total count across page lifetime
+let totalDetoxified = 0;
 
-// Prevent re-processing the same block
-const markDetoxified = (el) => { if (el && el.dataset) el.dataset.detoxified = '1'; };
-const isAlreadyDetoxified = (el) => el && el.dataset && el.dataset.detoxified === '1';
+// Results panel UI (green = captured but unchanged, red = changed before/after)
+const createResultsPanel = () => {
+  if (document.getElementById('detox-results-panel')) return;
 
-const flushBatch = () => {
+  const panel = document.createElement('div');
+  panel.id = 'detox-results-panel';
+  panel.style.position = 'fixed';
+  panel.style.left = '12px';
+  panel.style.bottom = '12px';
+  panel.style.width = '360px';
+  panel.style.maxHeight = '48vh';
+  panel.style.overflow = 'auto';
+  panel.style.background = 'rgba(255,255,255,0.95)';
+  panel.style.border = '1px solid rgba(0,0,0,0.12)';
+  panel.style.borderRadius = '8px';
+  panel.style.padding = '8px';
+  panel.style.zIndex = '10000';
+  panel.style.fontSize = '12px';
+  panel.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
+
+  const title = document.createElement('div');
+  title.textContent = 'Detox Results';
+  title.style.fontWeight = '600';
+  title.style.marginBottom = '6px';
+  panel.appendChild(title);
+
+  const lists = document.createElement('div');
+  lists.style.display = 'flex';
+  lists.style.gap = '8px';
+
+  const capturedCol = document.createElement('div');
+  capturedCol.style.flex = '1';
+  const capHeader = document.createElement('div');
+  capHeader.textContent = 'Captured (unchanged)';
+  capHeader.style.background = '#e6ffed';
+  capHeader.style.padding = '4px';
+  capHeader.style.borderRadius = '4px';
+  capHeader.style.marginBottom = '4px';
+  capturedCol.appendChild(capHeader);
+  const capList = document.createElement('div');
+  capList.id = 'detox-captured-list';
+  capList.style.display = 'flex';
+  capList.style.flexDirection = 'column';
+  capList.style.gap = '6px';
+  capturedCol.appendChild(capList);
+
+  const changedCol = document.createElement('div');
+  changedCol.style.flex = '1';
+  const chHeader = document.createElement('div');
+  chHeader.textContent = 'Changed (before → after)';
+  chHeader.style.background = '#ffecec';
+  chHeader.style.padding = '4px';
+  chHeader.style.borderRadius = '4px';
+  chHeader.style.marginBottom = '4px';
+  changedCol.appendChild(chHeader);
+  const chList = document.createElement('div');
+  chList.id = 'detox-changed-list';
+  chList.style.display = 'flex';
+  chList.style.flexDirection = 'column';
+  chList.style.gap = '6px';
+  changedCol.appendChild(chList);
+
+  lists.appendChild(capturedCol);
+  lists.appendChild(changedCol);
+  panel.appendChild(lists);
+
+  document.body.appendChild(panel);
+};
+
+const addCapturedEntry = (text) => {
+  createResultsPanel();
+  const list = document.getElementById('detox-captured-list');
+  if (!list) return;
+  const item = document.createElement('div');
+  item.style.background = '#e6ffed';
+  item.style.padding = '6px';
+  item.style.borderRadius = '4px';
+  item.style.wordBreak = 'break-word';
+  item.textContent = text;
+  list.prepend(item);
+};
+
+const addChangedEntry = (original, changed) => {
+  createResultsPanel();
+  const list = document.getElementById('detox-changed-list');
+  if (!list) return;
+  const item = document.createElement('div');
+  item.style.background = '#fff0f0';
+  item.style.padding = '6px';
+  item.style.borderRadius = '4px';
+  item.style.wordBreak = 'break-word';
+
+  const before = document.createElement('div');
+  before.style.textDecoration = 'line-through';
+  before.style.color = '#8b0000';
+  before.textContent = original;
+
+  const after = document.createElement('div');
+  after.style.marginTop = '4px';
+  after.style.color = '#006400';
+  after.textContent = changed;
+
+  item.appendChild(before);
+  item.appendChild(after);
+  list.prepend(item);
+};
+
+// Tracking and error prevention
+let processingError = false;
+let textElements = new Map(); // Store references to processed elements
+
+// Prevent re-processing the same block and track elements
+const markDetoxified = (el, id) => { 
+  if (el?.dataset) {
+    el.dataset.detoxified = '1';
+    el.dataset.textId = String(id);
+    textElements.set(String(id), el);
+  }
+};
+
+const isAlreadyDetoxified = (el) => el?.dataset?.detoxified === '1';
+
+// Highlight support
+const highlight = (el) => {
+  if (!el) return;
+  el.style.outline = '2px solid #0366d6';
+  el.style.boxShadow = '0 0 10px rgba(3, 102, 214, 0.3)';
+};
+
+const removeHighlight = (el) => {
+  if (!el) return;
+  el.style.outline = '';
+  el.style.boxShadow = '';
+};
+
+const flushBatch = async () => {
   if (batchTimer) {
     clearTimeout(batchTimer);
     batchTimer = null;
@@ -75,23 +228,17 @@ const flushBatch = () => {
   const items = batchQueue.splice(0, batchQueue.length);
   const texts = items.map(i => i.text);
 
-  chrome.runtime.sendMessage({ type: 'detoxifyText', texts }, (response) => {
-    if (!response) {
-      console.error('No response from background for batch');
-      return;
-    }
-    if (!response.success) {
-      console.error('Batch detox failed:', response.error);
-      // On failure, we can optionally fallback to simple keyword replacement
-    }
+  try {
+    const toxicResults = await classifyTexts(texts);
 
-    const outputs = response.outputs || [];
-    items.forEach((it, idx) => {
-      const out = outputs[idx] && outputs[idx].length > 0 ? outputs[idx] : it.text;
+    const toxicItems = items.filter((_, idx) => toxicResults[idx]);
+    const nonToxicItems = items.filter((_, idx) => !toxicResults[idx]);
+
+    nonToxicItems.forEach(it => {
       try {
         const span = document.createElement('span');
-        span.textContent = out;
-        span.style.backgroundColor = '#ffffcc';
+        span.textContent = it.text;
+        span.style.backgroundColor = '#e6ffed';
 
         const parent = it.nodes[0] && it.nodes[0].parentNode;
         if (parent) {
@@ -100,21 +247,70 @@ const flushBatch = () => {
           markDetoxified(parent);
 
           chrome.runtime.sendMessage({
-            type: "logDetox",
+            type: "logDetected",
             payload: {
-              original: it.text,
-              detoxified: out,
+              text: it.text,
               timestamp: new Date().toISOString()
             }
           });
-          updateDetoxBadge(1);
         }
       } catch (err) {
-        console.error('Error applying detoxified text for item', it, err);
+        console.error('Error processing non-toxic text:', err);
       }
     });
-  });
-};
+
+    if (toxicItems.length > 0) {
+      const toxicTexts = toxicItems.map(i => i.text);
+
+      chrome.runtime.sendMessage({ type: 'detoxifyText', texts: toxicTexts }, (response) => {
+        if (!response) {
+          console.error('No response from background for batch');
+          return;
+        }
+        if (!response.success) {
+          console.error('Batch detox failed:', response.error);
+          return;
+        }
+
+        const outputs = response.outputs || [];
+        toxicItems.forEach((it, idx) => {
+          const out = outputs[idx] && outputs[idx].length > 0 ? outputs[idx] : it.text;
+          try {
+            const span = document.createElement('span');
+            span.textContent = out;
+            span.style.backgroundColor = out !== it.text ? '#ffecec' : '#e6ffed';
+
+            const parent = it.nodes[0] && it.nodes[0].parentNode;
+            if (parent) {
+              it.nodes.forEach(n => n.parentNode?.removeChild(n));
+              parent.appendChild(span);
+              markDetoxified(parent);
+
+              chrome.runtime.sendMessage({
+                type: "logDetox",
+                payload: {
+                  original: it.text,
+                  detoxified: out,
+                  timestamp: new Date().toISOString()
+                }
+              });
+              totalDetoxified += 1;
+              updateDetoxBadge(totalDetoxified);
+
+              if (out === it.text) addCapturedEntry(it.text);
+              else addChangedEntry(it.text, out);
+            }
+          } catch (err) {
+            console.error('Error applying detoxified text for item', it, err);
+          }
+        });
+      }); // ← closes chrome.runtime.sendMessage callback
+    }
+  } catch (err) {
+    console.error('Error during batch classification:', err);
+  }
+}; // ← closes flushBatch function
+
 
 const enqueueForDetox = (nodes, text) => {
   // Skip if parent block already detoxified
@@ -144,46 +340,74 @@ const isVisible = el => {
 };
 
 const scanBlockElements = (root = document.body) => {
-  let detoxCount = 0;
   createDetoxBadge();
-  console.log("🔁 Rescanning block elements...");
-  const blocks = root.querySelectorAll('div, p, li, article, section, td, th');
+  console.log("🔁 Scanning for text blocks...");
+  
+  // Get all text-containing elements
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: node => {
+        const text = node.textContent.trim();
+        if (!text) return NodeFilter.FILTER_REJECT;
+        
+        // Check parent visibility
+        const parent = node.parentElement;
+        if (!parent || !isVisible(parent)) return NodeFilter.FILTER_REJECT;
 
-  blocks.forEach(block => {
-    if (!isVisible(block)) return;
+        // Only filter by length
+        const len = text.length;
+        if (len < 10 || len > 1000) return NodeFilter.FILTER_REJECT;
 
-    const textNodes = [];
-    const walker = document.createTreeWalker(
-      block,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: node =>
-          node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_ACCEPT;
       }
-    );
-
-    let node;
-    while ((node = walker.nextNode())) {
-      if (isVisible(node.parentElement)) textNodes.push(node);
     }
+  );
 
-    if (textNodes.length === 0) return;
+  // Group nearby text nodes together
+  const textGroups = new Map();
+  let currentGroup = [];
+  let lastParent = null;
+  
+  let node;
+  while (node = walker.nextNode()) {
+    const parent = node.parentElement;
+    
+    // Start new group if parent changed
+    if (parent !== lastParent && currentGroup.length > 0) {
+      const text = currentGroup.map(n => n.textContent).join(' ').trim();
+      if (text.length >= 10 && text.length <= 1000) {
+        textGroups.set(lastParent, currentGroup.slice());
+      }
+      currentGroup = [];
+    }
+    
+    currentGroup.push(node);
+    lastParent = parent;
+  }
+  
+  // Process last group
+  if (currentGroup.length > 0 && lastParent) {
+    const text = currentGroup.map(n => n.textContent).join(' ').trim();
+    if (text.length >= 20 && text.length <= 1000) {
+      textGroups.set(lastParent, currentGroup.slice());
+    }
+  }
 
-    const combinedText = textNodes.map(n => n.nodeValue).join(' ').trim();
-    if (combinedText.length < 10 || combinedText.length > 1000) return;
-
-    const item = { nodes: textNodes, originalText: combinedText };
-    processTextBlock(item);
+  // Process all groups
+  textGroups.forEach((nodes, parent) => {
+    if (!isAlreadyDetoxified(parent)) {
+      const text = nodes.map(n => n.textContent).join(' ').trim();
+      processTextBlock({ nodes, originalText: text });
+    }
   });
 };
 
 const processTextBlock = async (item) => {
   const { originalText, nodes } = item;
-  const label = classify(originalText);
-  if (label !== "toxic") return;
-
-    // enqueue for batched detoxification
-    enqueueForDetox(nodes, originalText);
+  // All blocks are now sent for classification in batches
+  enqueueForDetox(nodes, originalText);
 };
 
 scanBlockElements();
@@ -202,11 +426,22 @@ const intersectionObserver = new IntersectionObserver(entries => {
 });
 document.querySelectorAll('*').forEach(el => intersectionObserver.observe(el));
 
+// Listen for highlight commands from popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'highlightText') {
+    const el = textElements.get(String(message.id));
+    if (el) highlight(el);
+  }
+  else if (message.type === 'removeHighlight') {
+    textElements.forEach(el => removeHighlight(el));
+  }
+});
+
 let lastUrl = location.href;
 setInterval(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
-    console.log("🔄 URL changed, rescanning...");
+    console.log("URL changed, rescanning...");
     scanBlockElements();
   }
 }, 1000);
