@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 # === CONFIG ===
 DATA_FILE = "classificationAI/classifyData.csv"
-MODEL_NAME = "distilbert-base-uncased"
+MODEL_NAME = "t5-small"
 NUM_EPOCHS = 1
 BATCH_SIZE = 32
 MAX_LENGTH = 256
