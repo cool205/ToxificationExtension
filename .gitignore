@@ -33,3 +33,5 @@ cache/
 Detoxifier_Generation/paragedi-detox-finetuned/
 Detoxifier_Generation/t5-small-detox-finetuned/
 t5-small-detox-finetuned/
+detoxGenerationModel/
+ClassificationModel/

@@ -377,7 +377,7 @@ const scanBlockElements = (root = document.body) => {
     // Start new group if parent changed
     if (parent !== lastParent && currentGroup.length > 0) {
       const text = currentGroup.map(n => n.textContent).join(' ').trim();
-      if (text.length >= 20 && text.length <= 1000) {
+      if (text.length >= 40 && text.length <= 1000) {
         textGroups.set(lastParent, currentGroup.slice());
       }
       currentGroup = [];
@@ -390,7 +390,7 @@ const scanBlockElements = (root = document.body) => {
   // Process last group
   if (currentGroup.length > 0 && lastParent) {
     const text = currentGroup.map(n => n.textContent).join(' ').trim();
-    if (text.length >= 20 && text.length <= 1000) {
+    if (text.length >= 40 && text.length <= 1000) {
       textGroups.set(lastParent, currentGroup.slice());
     }
   }
