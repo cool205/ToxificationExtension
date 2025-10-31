@@ -18,7 +18,7 @@ import torch.nn as nn
 # === CONFIG ===
 DATA_FILE = "classificationAI/classifyData.csv"
 MODEL_NAME = "distilbert-base-uncased"
-NUM_EPOCHS = 3
+NUM_EPOCHS = 2
 # grid search space
 BATCH_SIZES = [8, 16, 32, 64, 128]
 LEARNING_RATES = [1e-6, 1e-5, 1e-4, 1e-3]
@@ -28,7 +28,9 @@ DROPOUTS = [0.4, 0.5, 0.6]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", DEVICE)
 OUTPUT_DIR = "./ClassificationModel"
+RUNS_DIR = os.path.join(OUTPUT_DIR, "runs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(RUNS_DIR, exist_ok=True)
 
 # results csv
 RESULTS_CSV = os.path.join(OUTPUT_DIR, "grid_search_results.csv")
@@ -81,8 +83,7 @@ def run_grid_search():
     # prepare results CSV header
     header = [
         "run_idx", "batch_size", "learning_rate", "max_length", "dropout",
-        "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc",
-        "model_dir", "status"
+        "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc"
     ]
     if not os.path.exists(RESULTS_CSV):
         with open(RESULTS_CSV, "w", newline='', encoding='utf-8') as f:
@@ -102,8 +103,8 @@ def run_grid_search():
     run_idx = 0
     for (bs, lr, ml, do) in combos:
         run_idx += 1
-        run_name = f"run_bs{bs}_lr{lr:.0e}_ml{ml}_do{int(do*10)}_{run_idx}"
-        run_output = os.path.join(OUTPUT_DIR, run_name)
+        run_name = f"run_bs{bs}_lr{lr:.0e}_ml{ml}_do{do}_{run_idx}"
+        run_output = os.path.join(RUNS_DIR, run_name)
         os.makedirs(run_output, exist_ok=True)
 
         step_log_path = os.path.join(run_output, "step_metrics.txt")
@@ -169,7 +170,7 @@ def run_grid_search():
                         model.train()
 
                         # === LOG + PRINT ===
-                        log_line = f"step={step}\tepoch={epoch}\tloss={loss.item():.4f}\ttrain_acc={train_acc:.4f}\tval_acc={val_acc:.4f}"
+                        log_line = f"batchsize={bs}, learning_rate={lr}, max_length={ml}, dropout={do}, {run_idx}, step={step}\tepoch={epoch}\tloss={loss.item():.4f}\ttrain_acc={train_acc:.4f}\tval_acc={val_acc:.4f}"
                         log_file.write(log_line + "\n")
                         print(log_line)
                         step += 1
@@ -178,22 +179,19 @@ def run_grid_search():
             final_train_loss, final_train_acc = evaluate_loader(model, DataLoader(train_dataset, batch_size=bs), DEVICE)
             final_val_loss, final_val_acc = evaluate_loader(model, DataLoader(val_dataset, batch_size=bs), DEVICE)
 
-            status = "ok"
         except Exception as e:
             traceback.print_exc()
             final_train_loss = final_train_acc = final_val_loss = final_val_acc = float('nan')
-            status = f"error: {str(e)[:200]}"
 
         # write summary to results csv
         with open(RESULTS_CSV, "a", newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([
                 run_idx, bs, lr, ml, do,
-                final_train_loss, final_train_acc, final_val_loss, final_val_acc,
-                run_output, status
+                final_train_loss, final_train_acc, final_val_loss, final_val_acc
             ])
 
-        print(f"Finished {run_name}: val_acc={final_val_acc:.4f} val_loss={final_val_loss:.4f} status={status}")
+        print(f"Finished {run_name}: val_acc={final_val_acc:.4f} val_loss={final_val_loss:.4f}")
 
 
 if __name__ == "__main__":
