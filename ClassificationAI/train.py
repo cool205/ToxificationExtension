@@ -18,15 +18,16 @@ import torch.nn as nn
 # === CONFIG ===
 DATA_FILE = "classificationAI/classifyData.csv"
 MODEL_NAME = "distilbert-base-uncased"
-NUM_EPOCHS = 3
+NUM_EPOCHS = 5
 
-import argparse
-
-# default hyperparameter values (can be overridden via CLI)
+# fixed hyperparameter defaults (no CLI overrides)
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_LR = 0.0001
 DEFAULT_MAX_LENGTH = 256
 DEFAULT_DROPOUT = 0.5
+
+# early stopping threshold (stop and save when val accuracy >= this)
+ACC_STOP_THRESHOLD = 0.97
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", DEVICE)
@@ -38,10 +39,7 @@ os.makedirs(RUNS_DIR, exist_ok=True)
 # results csv
 RESULTS_CSV = os.path.join(OUTPUT_DIR, "grid_search_results.csv")
 
-# === LOAD DATA ===
-df = pd.read_csv(DATA_FILE).dropna(subset=["text", "label"]).reset_index(drop=True)
-le = LabelEncoder()
-df["label"] = le.fit_transform(df["label"])
+# Note: data is loaded inside train_one so this script uses the DATA_FILE constant
 
 # === DATASET CLASS ===
 class TextDataset(Dataset):
@@ -123,10 +121,16 @@ def train_one(batch_size: int, learning_rate: float, max_length: int, dropout: f
     model.to(DEVICE)
     optimizer = AdamW(model.parameters(), lr=learning_rate)
 
-    # training with logging
-    with open(step_log_path, "w", encoding="utf-8") as log_file:
+    # training with logging (write raw txt log and structured per-step CSV)
+    step_csv_path = os.path.join(run_output, "step_summary.csv")
+    with open(step_log_path, "w", encoding="utf-8") as log_file, open(step_csv_path, "w", newline='', encoding="utf-8") as csvf:
+        csv_writer = csv.writer(csvf)
+        # header: step, epoch, loss, train_acc, val_acc, timestamp
+        csv_writer.writerow(["step", "epoch", "loss", "train_acc", "val_acc", "timestamp"])
+
         step = 0
         model.train()
+        early_stop = False
         for epoch in range(num_epochs):
             print(f"Epoch {epoch + 1}/{num_epochs}")
             for batch in train_loader:
@@ -157,62 +161,85 @@ def train_one(batch_size: int, learning_rate: float, max_length: int, dropout: f
 
                 log_line = f"step={step}\tepoch={epoch}\tloss={loss.item():.4f}\ttrain_acc={train_acc:.4f}\tval_acc={val_acc:.4f}"
                 log_file.write(log_line + "\n")
+                csv_writer.writerow([step, epoch, float(loss.item()), float(train_acc), float(val_acc), time.time()])
                 print(log_line)
                 step += 1
 
-    # final evaluation and save model
-    final_train_loss, final_train_acc = evaluate_loader(model, DataLoader(train_dataset, batch_size=batch_size), DEVICE)
-    final_val_loss, final_val_acc = evaluate_loader(model, DataLoader(val_dataset, batch_size=batch_size), DEVICE)
+                # Early stopping: if validation accuracy meets threshold, compute final metrics, save and exit
+                if not math.isnan(val_acc) and val_acc >= ACC_STOP_THRESHOLD:
+                    print(f"Reached target val_acc={val_acc:.4f} >= {ACC_STOP_THRESHOLD}; saving model and stopping training.")
+                    # compute final metrics on full sets
+                    final_train_loss, final_train_acc = evaluate_loader(model, DataLoader(train_dataset, batch_size=batch_size), DEVICE)
+                    final_val_loss, final_val_acc = evaluate_loader(model, DataLoader(val_dataset, batch_size=batch_size), DEVICE)
 
-    # save model and tokenizer
-    os.makedirs(output_dir, exist_ok=True)
-    model.save_pretrained(output_dir)
-    tokenizer.save_pretrained(output_dir)
+                    # save model and tokenizer
+                    os.makedirs(output_dir, exist_ok=True)
+                    model.save_pretrained(output_dir)
+                    tokenizer.save_pretrained(output_dir)
 
-    # write a small summary csv for this run
-    summary_csv = os.path.join(OUTPUT_DIR, "run_summary.csv")
-    header = [
-        "batch_size", "learning_rate", "max_length", "dropout", "num_epochs",
-        "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc", "model_dir"
-    ]
-    write_header = not os.path.exists(summary_csv)
-    with open(summary_csv, "a", newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(header)
-        writer.writerow([
-            batch_size, learning_rate, max_length, dropout, num_epochs,
-            final_train_loss, final_train_acc, final_val_loss, final_val_acc, output_dir
-        ])
+                    # write a small summary csv for this run
+                    summary_csv = os.path.join(OUTPUT_DIR, "run_summary.csv")
+                    header = [
+                        "batch_size", "learning_rate", "max_length", "dropout", "num_epochs",
+                        "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc", "model_dir"
+                    ]
+                    write_header = not os.path.exists(summary_csv)
+                    with open(summary_csv, "a", newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        if write_header:
+                            writer.writerow(header)
+                        writer.writerow([
+                            batch_size, learning_rate, max_length, dropout, num_epochs,
+                            final_train_loss, final_train_acc, final_val_loss, final_val_acc, output_dir
+                        ])
 
-    print(f"Training finished. Model saved to {output_dir}")
-    print(f"Final val_acc={final_val_acc:.4f} val_loss={final_val_loss:.4f}")
+                    early_stop = True
+                    break
+            if early_stop:
+                break
+
+    # if training completed without early stop, do final evaluation and save
+    if not early_stop:
+        final_train_loss, final_train_acc = evaluate_loader(model, DataLoader(train_dataset, batch_size=batch_size), DEVICE)
+        final_val_loss, final_val_acc = evaluate_loader(model, DataLoader(val_dataset, batch_size=batch_size), DEVICE)
+
+        # save model and tokenizer
+        os.makedirs(output_dir, exist_ok=True)
+        model.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
+        # write a small summary csv for this run
+        summary_csv = os.path.join(OUTPUT_DIR, "run_summary.csv")
+        header = [
+            "batch_size", "learning_rate", "max_length", "dropout", "num_epochs",
+            "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc", "model_dir"
+        ]
+        write_header = not os.path.exists(summary_csv)
+        with open(summary_csv, "a", newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(header)
+            writer.writerow([
+                batch_size, learning_rate, max_length, dropout, num_epochs,
+                final_train_loss, final_train_acc, final_val_loss, final_val_acc, output_dir
+            ])
+
+        print(f"Training finished. Model saved to {output_dir}")
+        print(f"Final val_acc={final_val_acc:.4f} val_loss={final_val_loss:.4f}")
+
+    
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train one classification model with adjustable hyperparameters")
-    parser.add_argument("--data_file", type=str, default=DATA_FILE)
-    parser.add_argument("--model_name", type=str, default=MODEL_NAME)
-    parser.add_argument("--output_dir", type=str, default=os.path.join(OUTPUT_DIR, "final_model"))
-    parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument("--learning_rate", type=float, default=DEFAULT_LR)
-    parser.add_argument("--max_length", type=int, default=DEFAULT_MAX_LENGTH)
-    parser.add_argument("--dropout", type=float, default=DEFAULT_DROPOUT)
-    parser.add_argument("--num_epochs", type=int, default=NUM_EPOCHS)
-    args = parser.parse_args()
-
-    # allow overriding data file
-    if args.data_file:
-        DATA_FILE = args.data_file
-
-    # call training
+    # Run a single training job with fixed hyperparameters (no CLI overrides)
+    final_output = os.path.join(OUTPUT_DIR, "final_model")
     train_one(
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        max_length=args.max_length,
-        dropout=args.dropout,
-        num_epochs=args.num_epochs,
-        model_name=args.model_name,
-        data_file=args.data_file,
-        output_dir=args.output_dir
+        batch_size=DEFAULT_BATCH_SIZE,
+        learning_rate=DEFAULT_LR,
+        max_length=DEFAULT_MAX_LENGTH,
+        dropout=DEFAULT_DROPOUT,
+        num_epochs=NUM_EPOCHS,
+        model_name=MODEL_NAME,
+        data_file=DATA_FILE,
+        output_dir=final_output,
     )
