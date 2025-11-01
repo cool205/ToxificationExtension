@@ -18,12 +18,15 @@ import torch.nn as nn
 # === CONFIG ===
 DATA_FILE = "classificationAI/classifyData.csv"
 MODEL_NAME = "distilbert-base-uncased"
-NUM_EPOCHS = 2
-# grid search space
-BATCH_SIZES = [8, 16, 32, 64, 128]
-LEARNING_RATES = [1e-6, 1e-5, 1e-4, 1e-3]
-MAX_LENGTHS = [256, 512]
-DROPOUTS = [0.4, 0.5, 0.6]
+NUM_EPOCHS = 3
+
+import argparse
+
+# default hyperparameter values (can be overridden via CLI)
+DEFAULT_BATCH_SIZE = 128
+DEFAULT_LR = 0.0001
+DEFAULT_MAX_LENGTH = 256
+DEFAULT_DROPOUT = 0.5
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", DEVICE)
@@ -80,119 +83,136 @@ def evaluate_loader(model, data_loader, device):
 
 
 def run_grid_search():
-    # prepare results CSV header
-    header = [
-        "run_idx", "batch_size", "learning_rate", "max_length", "dropout",
-        "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc"
-    ]
-    if not os.path.exists(RESULTS_CSV):
-        with open(RESULTS_CSV, "w", newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
+    # Single-run training driven by CLI arguments
+    pass
 
-    combos = []
-    for bs in BATCH_SIZES:
-        for lr in LEARNING_RATES:
-            for ml in MAX_LENGTHS:
-                for do in DROPOUTS:
-                    combos.append((bs, lr, ml, do))
 
-    total = len(combos)
-    print(f"Starting grid search with {total} runs")
+def train_one(batch_size: int, learning_rate: float, max_length: int, dropout: float, num_epochs: int, model_name: str, data_file: str, output_dir: str):
+    run_name = f"run_bs{batch_size}_lr{learning_rate:.0e}_ml{max_length}_do{dropout}"
+    run_output = os.path.join(RUNS_DIR, run_name)
+    os.makedirs(run_output, exist_ok=True)
+    step_log_path = os.path.join(run_output, "step_metrics.txt")
 
-    run_idx = 0
-    for (bs, lr, ml, do) in combos:
-        run_idx += 1
-        run_name = f"run_bs{bs}_lr{lr:.0e}_ml{ml}_do{do}_{run_idx}"
-        run_output = os.path.join(RUNS_DIR, run_name)
-        os.makedirs(run_output, exist_ok=True)
+    # tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        step_log_path = os.path.join(run_output, "step_metrics.txt")
-        print(f"\n[{run_idx}/{total}] Starting {run_name}")
+    # load and prepare data for this run (so CLI override works)
+    df_run = pd.read_csv(data_file).dropna(subset=["text", "label"]).reset_index(drop=True)
+    le_run = LabelEncoder()
+    df_run["label"] = le_run.fit_transform(df_run["label"])
 
-        try:
-            # tokenizer per run (max_length used by dataset)
-            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    # split data
+    train_texts, val_texts, train_labels, val_labels = train_test_split(
+        df_run["text"].tolist(), df_run["label"].tolist(), test_size=0.2, random_state=42, stratify=df_run["label"].tolist()
+    )
 
-            # split data
-            train_texts, val_texts, train_labels, val_labels = train_test_split(
-                df["text"].tolist(), df["label"].tolist(), test_size=0.2, random_state=42, stratify=df["label"].tolist()
-            )
+    train_dataset = TextDataset(train_texts, train_labels, tokenizer, max_length=max_length)
+    val_dataset = TextDataset(val_texts, val_labels, tokenizer, max_length=max_length)
 
-            train_dataset = TextDataset(train_texts, train_labels, tokenizer, max_length=ml)
-            val_dataset = TextDataset(val_texts, val_labels, tokenizer, max_length=ml)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
-            train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=bs)
+    # model config with dropout
+    config = AutoConfig.from_pretrained(model_name, num_labels=len(le_run.classes_))
+    if hasattr(config, 'hidden_dropout_prob'):
+        config.hidden_dropout_prob = dropout
+    if hasattr(config, 'attention_probs_dropout_prob'):
+        config.attention_probs_dropout_prob = dropout
 
-            # model config with dropout
-            config = AutoConfig.from_pretrained(MODEL_NAME, num_labels=len(le.classes_))
-            # set dropout fields if present
-            if hasattr(config, 'hidden_dropout_prob'):
-                config.hidden_dropout_prob = do
-            if hasattr(config, 'attention_probs_dropout_prob'):
-                config.attention_probs_dropout_prob = do
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+    model.to(DEVICE)
+    optimizer = AdamW(model.parameters(), lr=learning_rate)
 
-            model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, config=config)
-            model.to(DEVICE)
-            optimizer = AdamW(model.parameters(), lr=lr)
+    # training with logging
+    with open(step_log_path, "w", encoding="utf-8") as log_file:
+        step = 0
+        model.train()
+        for epoch in range(num_epochs):
+            print(f"Epoch {epoch + 1}/{num_epochs}")
+            for batch in train_loader:
+                batch = {k: v.to(DEVICE) for k, v in batch.items()}
+                outputs = model(**batch)
+                loss = outputs.loss
+                logits = outputs.logits
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
 
-            # training loop with per-run logging
-            with open(step_log_path, "w", encoding="utf-8") as log_file:
-                step = 0
+                preds = torch.argmax(logits, dim=1).cpu().numpy()
+                labels = batch["labels"].cpu().numpy()
+                train_acc = accuracy_score(labels, preds)
+
+                # validation per-step (same as before)
+                model.eval()
+                val_preds, val_labels_epoch = [], []
+                with torch.no_grad():
+                    for val_batch in val_loader:
+                        val_batch = {k: v.to(DEVICE) for k, v in val_batch.items()}
+                        val_outputs = model(**val_batch)
+                        val_logits = val_outputs.logits
+                        val_preds.extend(torch.argmax(val_logits, dim=1).cpu().numpy())
+                        val_labels_epoch.extend(val_batch["labels"].cpu().numpy())
+                val_acc = accuracy_score(val_labels_epoch, val_preds) if val_labels_epoch else float('nan')
                 model.train()
-                for epoch in range(NUM_EPOCHS):
-                    print(f"Epoch {epoch + 1}/{NUM_EPOCHS}")
-                    for batch in train_loader:
-                        batch = {k: v.to(DEVICE) for k, v in batch.items()}
-                        outputs = model(**batch)
-                        loss = outputs.loss
-                        logits = outputs.logits
-                        loss.backward()
-                        optimizer.step()
-                        optimizer.zero_grad()
 
-                        preds = torch.argmax(logits, dim=1).cpu().numpy()
-                        labels = batch["labels"].cpu().numpy()
-                        train_acc = accuracy_score(labels, preds)
+                log_line = f"step={step}\tepoch={epoch}\tloss={loss.item():.4f}\ttrain_acc={train_acc:.4f}\tval_acc={val_acc:.4f}"
+                log_file.write(log_line + "\n")
+                print(log_line)
+                step += 1
 
-                        # === VALIDATION (quick per-step sample evaluation) ===
-                        model.eval()
-                        val_preds, val_labels_epoch = [], []
-                        with torch.no_grad():
-                            for val_batch in val_loader:
-                                val_batch = {k: v.to(DEVICE) for k, v in val_batch.items()}
-                                val_outputs = model(**val_batch)
-                                val_logits = val_outputs.logits
-                                val_preds.extend(torch.argmax(val_logits, dim=1).cpu().numpy())
-                                val_labels_epoch.extend(val_batch["labels"].cpu().numpy())
-                        val_acc = accuracy_score(val_labels_epoch, val_preds) if val_labels_epoch else float('nan')
-                        model.train()
+    # final evaluation and save model
+    final_train_loss, final_train_acc = evaluate_loader(model, DataLoader(train_dataset, batch_size=batch_size), DEVICE)
+    final_val_loss, final_val_acc = evaluate_loader(model, DataLoader(val_dataset, batch_size=batch_size), DEVICE)
 
-                        # === LOG + PRINT ===
-                        log_line = f"batchsize={bs}, learning_rate={lr}, max_length={ml}, dropout={do}, {run_idx}, step={step}\tepoch={epoch}\tloss={loss.item():.4f}\ttrain_acc={train_acc:.4f}\tval_acc={val_acc:.4f}"
-                        log_file.write(log_line + "\n")
-                        print(log_line)
-                        step += 1
+    # save model and tokenizer
+    os.makedirs(output_dir, exist_ok=True)
+    model.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
 
-            # final evaluation on full train/val sets
-            final_train_loss, final_train_acc = evaluate_loader(model, DataLoader(train_dataset, batch_size=bs), DEVICE)
-            final_val_loss, final_val_acc = evaluate_loader(model, DataLoader(val_dataset, batch_size=bs), DEVICE)
+    # write a small summary csv for this run
+    summary_csv = os.path.join(OUTPUT_DIR, "run_summary.csv")
+    header = [
+        "batch_size", "learning_rate", "max_length", "dropout", "num_epochs",
+        "final_train_loss", "final_train_acc", "final_val_loss", "final_val_acc", "model_dir"
+    ]
+    write_header = not os.path.exists(summary_csv)
+    with open(summary_csv, "a", newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(header)
+        writer.writerow([
+            batch_size, learning_rate, max_length, dropout, num_epochs,
+            final_train_loss, final_train_acc, final_val_loss, final_val_acc, output_dir
+        ])
 
-        except Exception as e:
-            traceback.print_exc()
-            final_train_loss = final_train_acc = final_val_loss = final_val_acc = float('nan')
-
-        # write summary to results csv
-        with open(RESULTS_CSV, "a", newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                run_idx, bs, lr, ml, do,
-                final_train_loss, final_train_acc, final_val_loss, final_val_acc
-            ])
-
-        print(f"Finished {run_name}: val_acc={final_val_acc:.4f} val_loss={final_val_loss:.4f}")
+    print(f"Training finished. Model saved to {output_dir}")
+    print(f"Final val_acc={final_val_acc:.4f} val_loss={final_val_loss:.4f}")
 
 
 if __name__ == "__main__":
-    run_grid_search()
+    parser = argparse.ArgumentParser(description="Train one classification model with adjustable hyperparameters")
+    parser.add_argument("--data_file", type=str, default=DATA_FILE)
+    parser.add_argument("--model_name", type=str, default=MODEL_NAME)
+    parser.add_argument("--output_dir", type=str, default=os.path.join(OUTPUT_DIR, "final_model"))
+    parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--learning_rate", type=float, default=DEFAULT_LR)
+    parser.add_argument("--max_length", type=int, default=DEFAULT_MAX_LENGTH)
+    parser.add_argument("--dropout", type=float, default=DEFAULT_DROPOUT)
+    parser.add_argument("--num_epochs", type=int, default=NUM_EPOCHS)
+    args = parser.parse_args()
+
+    # allow overriding data file
+    if args.data_file:
+        DATA_FILE = args.data_file
+
+    # call training
+    train_one(
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        max_length=args.max_length,
+        dropout=args.dropout,
+        num_epochs=args.num_epochs,
+        model_name=args.model_name,
+        data_file=args.data_file,
+        output_dir=args.output_dir
+    )

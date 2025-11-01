@@ -4,7 +4,7 @@ from tabulate import tabulate
 
 value = 'final_val_acc'
 # Load CSV
-df = pd.read_csv('ClassificationModel/grid_search_results.csv')
+df = pd.read_csv('classificationAI/ClassificationModel/grid_search_results.csv')
 
 sorted_df = df.sort_values(by=value, ascending=True)
 
