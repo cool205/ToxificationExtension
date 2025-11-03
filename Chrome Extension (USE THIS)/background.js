@@ -3,8 +3,8 @@ let detectedLog = [];
 
 // Configuration
 const CONFIG = {
-  CLASSIFY_ENDPOINT: "https://your-classification-model.hf.space/run/predict",
-  DETOX_ENDPOINT: "https://techkid0109-detoxificationai.hf.space/run/predict",
+  API_BASE: "https://TechKid0109-DetoxificationAI.hf.space",
+  TOXIC_CONFIDENCE_THRESHOLD: 0.7,
   MAX_RETRIES: 3,
   RETRY_DELAY: 1000,
   BACKOFF_FACTOR: 1.5
@@ -25,24 +25,22 @@ async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
   }
 }
 
-// Classify text as toxic or non-toxic with retry logic
+// Classify text as toxic or non-toxic with retry logic and confidence threshold
 async function classifyText(text) {
   try {
-    // TODO: Replace mockup with actual API call
-    // For now, use keyword detection but wrapped in retry logic
-    const mockApiCall = async () => {
-      const toxicWords = ["hate", "kill", "stupid", "idiot", "ugly", "trash"];
-      const hasToxic = toxicWords.some(word => 
-        typeof text === 'string' && text.toLowerCase().includes(word)
-      );
-      return { data: [{ toxic: hasToxic }] };
-    };
+    const response = await fetchWithRetry(`${CONFIG.API_BASE}/classify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        text,
+        threshold: CONFIG.TOXIC_CONFIDENCE_THRESHOLD
+      })
+    });
 
-    // Simulate network call with retry
-    const json = await mockApiCall();
-    return { 
-      success: true, 
-      isToxic: json?.data?.[0]?.toxic ?? false 
+    return {
+      success: true,
+      isToxic: response.toxic === true,
+      confidence: response.confidence || {}
     };
   } catch (err) {
     console.error("Classification error:", err);
@@ -112,13 +110,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Support both single-string (`text`) and batched (`texts`) requests.
     (async () => {
       try {
-        const endpoint = "https://techkid0109-detoxificationai.hf.space/run/predict";
         const maxLen = 5000;
 
         if (Array.isArray(msg.texts)) {
-          // Batch mode: truncate each entry and send as data array
-          const payloads = msg.texts.map(t => (typeof t === 'string' && t.length > maxLen) ? t.slice(0, maxLen) : t);
-          const body = JSON.stringify({ data: payloads });
+          // Batch mode: truncate each entry and process individually
+          // First classify all texts
+          const classifications = await Promise.all(msg.texts.map(text => classifyText(text)));
+          
+          // Only detoxify texts that are classified as toxic with high confidence
+          const results = await Promise.all(msg.texts.map(async (text, index) => {
+            const classification = classifications[index];
+            
+            if (classification.success && classification.isToxic) {
+              const truncated = typeof text === 'string' && text.length > maxLen ? text.slice(0, maxLen) : text;
+              const response = await fetchWithRetry(`${CONFIG.API_BASE}/detoxify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: truncated })
+              });
+              return response.detoxified || text;
+            }
+            return text; // Return original if not toxic or classification failed
+          }));
 
           const res = await fetch(endpoint, {
             method: "POST",
@@ -149,23 +162,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // Single-text mode (backwards compatible)
         const text = msg.text || "";
         const payloadText = (typeof text === 'string' && text.length > maxLen) ? text.slice(0, maxLen) : text;
-        const body = JSON.stringify({ data: [payloadText] });
+        
+        // First classify the text
+        const classification = await classifyText(payloadText);
+        
+        // Only detoxify if classified as toxic with high confidence
+        const response = classification.success && classification.isToxic ?
+          await fetchWithRetry(`${CONFIG.API_BASE}/detoxify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: payloadText })
+          }) : { detoxified: payloadText };
 
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-        const json = await res.json();
-
-        let output = "";
-        if (json && Array.isArray(json.data) && typeof json.data[0] === 'string') {
-          output = json.data[0];
-        } else if (json && typeof json.data === 'string') {
-          output = json.data;
-        } else if (json && json.output) {
-          if (Array.isArray(json.output)) output = json.output.join('');
-          else if (typeof json.output === 'string') output = json.output;
+        const output = response.detoxified || payloadText;
+        if (!output) {
+          throw new Error('No detoxified output received');
         } else if (typeof json === 'string') {
           output = json;
         }
