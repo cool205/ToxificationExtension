@@ -9,8 +9,8 @@ def run_training():
     # Get the absolute path to train.py
     script_dir = os.path.dirname(os.path.abspath(__file__))
     train_script = os.path.join(script_dir, "train.py")
-    
-    # For Windows, use start command to open new terminal
+     
+    # For Window s, use start command to open new terminal
     cmd = f'start cmd /K "{python_exe} {train_script}"'
     subprocess.run(cmd, shell=True)
     

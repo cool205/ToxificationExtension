@@ -8,7 +8,7 @@ train_accs = []
 val_accs = []
 
 # Read and parse the log file
-with open('ClassificationModel/runs/run_bs128_lr1e-04_ml256_do0.5/step_metrics.txt', 'r') as file:
+with open('ClassificationModel/runs/bs128_lr1e-04_ml256_do0.5/step_metrics.txt', 'r') as file:
     for line in file:
         match = re.search(
             r"step=(\d+)\s+epoch=\d+\s+loss=([0-9.]+)\s+train_acc=([0-9.]+)\s+val_acc=([0-9.]+)", 
