@@ -234,6 +234,7 @@ const flushBatch = async () => {
     const toxicItems = items.filter((_, idx) => toxicResults[idx]);
     const nonToxicItems = items.filter((_, idx) => !toxicResults[idx]);
 
+    // Non-toxic items: highlight on page, but do not log for popup
     nonToxicItems.forEach(it => {
       try {
         const span = document.createElement('span');
@@ -245,14 +246,6 @@ const flushBatch = async () => {
           it.nodes.forEach(n => n.parentNode?.removeChild(n));
           parent.appendChild(span);
           markDetoxified(parent);
-
-          chrome.runtime.sendMessage({
-            type: "logDetected",
-            payload: {
-              text: it.text,
-              timestamp: new Date().toISOString()
-            }
-          });
         }
       } catch (err) {
         console.error('Error processing non-toxic text:', err);
@@ -261,7 +254,6 @@ const flushBatch = async () => {
 
     if (toxicItems.length > 0) {
       const toxicTexts = toxicItems.map(i => i.text);
-
       chrome.runtime.sendMessage({ type: 'detoxifyText', texts: toxicTexts }, (response) => {
         if (!response) {
           console.error('No response from background for batch');
@@ -278,7 +270,7 @@ const flushBatch = async () => {
           try {
             const span = document.createElement('span');
             span.textContent = out;
-            span.style.backgroundColor = out !== it.text ? '#ffecec' : '#e6ffed';
+            span.style.backgroundColor = '#ffecec';
 
             const parent = it.nodes[0] && it.nodes[0].parentNode;
             if (parent) {
@@ -296,15 +288,13 @@ const flushBatch = async () => {
               });
               totalDetoxified += 1;
               updateDetoxBadge(totalDetoxified);
-
-              if (out === it.text) addCapturedEntry(it.text);
-              else addChangedEntry(it.text, out);
+              addChangedEntry(it.text, out);
             }
           } catch (err) {
             console.error('Error applying detoxified text for item', it, err);
           }
         });
-      }); // ← closes chrome.runtime.sendMessage callback
+      });
     }
   } catch (err) {
     console.error('Error during batch classification:', err);

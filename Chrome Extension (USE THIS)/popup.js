@@ -13,44 +13,11 @@ document.body.insertBefore(highlightDisplay, document.body.firstChild);
 
 // Function to update the tables
 function updateTables(detoxLog = [], detectedLog = []) {
-  // Update counters
-  document.getElementById('detectedCount').textContent = detectedLog.length;
+  // Only update changed (toxic → detoxified) table and counter
   document.getElementById('changedCount').textContent = detoxLog.length;
-  
-  // Update detected (non-toxic) text table
-  const detectedBody = document.getElementById('detectedTableBody');
-  detectedBody.innerHTML = '';
 
-  if (detectedLog.length === 0) {
-    const row = document.createElement('tr');
-    row.innerHTML = `<td style="text-align:center">No non-toxic text detected yet.</td>`;
-    detectedBody.appendChild(row);
-  } else {
-    detectedLog.forEach(({ text, timestamp, id }) => {
-      const row = document.createElement('tr');
-      row.dataset.textId = id;
-      row.innerHTML = `<td style="background-color: #e6ffed">${text}</td>`;
-      row.addEventListener('mouseenter', () => {
-        highlightText(id);
-        highlightDisplay.textContent = text;
-        highlightDisplay.style.display = 'block';
-      });
-      row.addEventListener('mouseleave', () => {
-        removeHighlight();
-        highlightDisplay.style.display = 'none';
-      });
-      row.addEventListener('click', () => {
-        removeHighlight();
-        highlightDisplay.style.display = 'none';
-      });
-      detectedBody.appendChild(row);
-    });
-  }
-
-  // Update changed (toxic → detoxified) table
   const detoxBody = document.getElementById('detoxTableBody');
   detoxBody.innerHTML = '';
-
   if (detoxLog.length === 0) {
     const row = document.createElement('tr');
     row.innerHTML = `<td colspan="2" style="text-align:center">No detoxified messages yet.</td>`;
