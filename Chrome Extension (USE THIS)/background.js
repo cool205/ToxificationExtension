@@ -1,46 +1,69 @@
 let detoxLog = [];
 let detectedLog = [];
 
+// Keep track of connected ports to keep the service worker alive while content scripts are open
+const connectedPorts = new Map();
+
 // Configuration
 const CONFIG = {
   API_BASE: "https://TechKid0109-DetoxificationAI.hf.space",
   TOXIC_CONFIDENCE_THRESHOLD: 0.7,
-  MAX_RETRIES: 3,
-  RETRY_DELAY: 1000,
-  BACKOFF_FACTOR: 1.5
+  MAX_RETRIES: 4
 };
 
 // Utility for delayed retry with exponential backoff
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchWithRetry(url, options, retries = CONFIG.MAX_RETRIES) {
-  try {
-    const response = await fetch(url, options);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } catch (err) {
-    if (retries <= 0) throw err;
-    await wait(CONFIG.RETRY_DELAY * Math.pow(CONFIG.BACKOFF_FACTOR, CONFIG.MAX_RETRIES - retries));
-    return fetchWithRetry(url, options, retries - 1);
+// Exponential retry that reports attempt counts and doesn't throw immediately
+// Returns { success: true, json, attempts } or { success: false, error, attempts }
+async function fetchWithRetry(url, options, maxAttempts = 4) {
+  const baseDelay = 1000; // 1s, then 2s, 4s, 8s
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status}`);
+        // If rate limited (429) or server error (5xx) allow retry
+        if (attempt < maxAttempts) {
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          await wait(delay);
+          continue;
+        }
+        return { success: false, error: String(lastError), attempts: attempt };
+      }
+      const json = await res.json();
+      return { success: true, json, attempts: attempt };
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        await wait(delay);
+        continue;
+      }
+      return { success: false, error: String(lastError), attempts: attempt };
+    }
   }
+  return { success: false, error: String(lastError), attempts: maxAttempts };
 }
 
 // Classify text as toxic or non-toxic with retry logic and confidence threshold
 async function classifyText(text) {
   try {
-    const response = await fetchWithRetry(`${CONFIG.API_BASE}/classify`, {
+    const res = await fetchWithRetry(`${CONFIG.API_BASE}/classify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        text,
-        threshold: CONFIG.TOXIC_CONFIDENCE_THRESHOLD
-      })
-    });
+      body: JSON.stringify({ text, threshold: CONFIG.TOXIC_CONFIDENCE_THRESHOLD })
+    }, CONFIG.MAX_RETRIES || 4);
 
+    if (!res.success) return { success: false, error: res.error, attempts: res.attempts };
+
+    const response = res.json;
     return {
       success: true,
-      isToxic: response.toxic === true,
-      confidence: response.confidence || {}
+      isToxic: response?.toxic === true,
+      confidence: response?.confidence || {},
+      attempts: res.attempts
     };
   } catch (err) {
     console.error("Classification error:", err);
@@ -64,7 +87,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "getDetoxLog") {
-    sendResponse({ detoxLog, detectedLog });
+    // toxic/detox pairs for table
+    const pairs = (detoxLog || []).map(e => ({
+      original: e.original,
+      detoxified: e.detoxified,
+      attempts: e.attempts,
+      error: e.error
+    }));
+    // all scanned text for dropdown, with toxicity
+    const allScanned = (detectedLog || []).map(e => ({
+      text: e.text,
+      isToxic: e.isToxic
+    }));
+    sendResponse({ pairs, allScanned });
     return;
   }
 
@@ -113,75 +148,81 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const maxLen = 5000;
 
         if (Array.isArray(msg.texts)) {
-          // Batch mode: truncate each entry and process individually
-          // First classify all texts
-          const classifications = await Promise.all(msg.texts.map(text => classifyText(text)));
-          
-          // Only detoxify texts that are classified as toxic with high confidence
-          const results = await Promise.all(msg.texts.map(async (text, index) => {
-            const classification = classifications[index];
-            
-            if (classification.success && classification.isToxic) {
-              const truncated = typeof text === 'string' && text.length > maxLen ? text.slice(0, maxLen) : text;
-              const response = await fetchWithRetry(`${CONFIG.API_BASE}/detoxify`, {
+          // Batch mode
+          const texts = msg.texts.map(t => (typeof t === 'string' && t.length > maxLen) ? t.slice(0, maxLen) : t);
+
+          // Classify all texts first (in parallel, each classify has its own retry attempts)
+          const classifications = await Promise.all(texts.map(t => classifyText(t)));
+
+          // For toxic items, call detoxify with retry; do these sequentially with a small delay to reduce burst rate
+          const outputs = [];
+          const attempts = [];
+          const errors = [];
+
+          for (let i = 0; i < texts.length; i++) {
+            const original = texts[i];
+            const cls = classifications[i];
+
+            if (cls && cls.success && cls.isToxic) {
+              // Detoxify with retry
+              const r = await fetchWithRetry(`${CONFIG.API_BASE}/detoxify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: truncated })
-              });
-              return response.detoxified || text;
+                body: JSON.stringify({ text: original })
+              }, CONFIG.MAX_RETRIES || 4);
+
+              if (r.success) {
+                // Try multiple common fields to extract detoxified text
+                const json = r.json || {};
+                const out = json.detoxified || (Array.isArray(json.data) ? json.data[0] : (Array.isArray(json.output) ? json.output[0] : '')) || original;
+                outputs.push(out);
+                attempts.push(r.attempts || 1);
+                errors.push(null);
+              } else {
+                outputs.push(original);
+                attempts.push(r.attempts || 0);
+                errors.push(r.error || 'detox error');
+              }
+
+              // Small delay between detox calls to reduce rate-limits (200ms)
+              await wait(200);
+            } else {
+              // Not toxic or classification failed -> return original text
+              outputs.push(original);
+              attempts.push(cls && cls.attempts ? cls.attempts : 0);
+              errors.push(cls && !cls.success ? cls.error : null);
             }
-            return text; // Return original if not toxic or classification failed
-          }));
-
-          const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body,
-          });
-          const json = await res.json();
-
-          // Expect json.data to be an array of outputs for batch calls
-          let outputs = [];
-          if (json && Array.isArray(json.data)) {
-            outputs = json.data.map(item => {
-              if (typeof item === 'string') return item;
-              if (Array.isArray(item)) return item.join('');
-              return String(item);
-            });
-          } else if (json && Array.isArray(json.output)) {
-            outputs = json.output.map(x => (typeof x === 'string' ? x : String(x)));
-          } else {
-            // Fallback: wrap any parseable top-level into an array of same length
-            outputs = payloads.map(() => '');
           }
 
-          sendResponse({ success: true, outputs });
+          sendResponse({ success: true, outputs, attempts, errors });
           return;
         }
 
-        // Single-text mode (backwards compatible)
+        // Single-text mode
         const text = msg.text || "";
         const payloadText = (typeof text === 'string' && text.length > maxLen) ? text.slice(0, maxLen) : text;
-        
-        // First classify the text
-        const classification = await classifyText(payloadText);
-        
-        // Only detoxify if classified as toxic with high confidence
-        const response = classification.success && classification.isToxic ?
-          await fetchWithRetry(`${CONFIG.API_BASE}/detoxify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: payloadText })
-          }) : { detoxified: payloadText };
 
-        const output = response.detoxified || payloadText;
-        if (!output) {
-          throw new Error('No detoxified output received');
-        } else if (typeof json === 'string') {
-          output = json;
+        const classification = await classifyText(payloadText);
+        if (!(classification && classification.success && classification.isToxic)) {
+          // Not toxic (or classification failed) -> return original
+          sendResponse({ success: true, output: payloadText, attempts: classification && classification.attempts ? classification.attempts : 0, error: classification && !classification.success ? classification.error : null });
+          return;
         }
 
-        sendResponse({ success: true, output });
+        const r = await fetchWithRetry(`${CONFIG.API_BASE}/detoxify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: payloadText })
+        }, CONFIG.MAX_RETRIES || 4);
+
+        if (!r.success) {
+          sendResponse({ success: false, error: r.error, attempts: r.attempts });
+          return;
+        }
+
+        const json = r.json || {};
+        const output = json.detoxified || (Array.isArray(json.data) ? json.data[0] : (Array.isArray(json.output) ? json.output[0] : payloadText)) || payloadText;
+        sendResponse({ success: true, output, attempts: r.attempts });
       } catch (err) {
         console.error("detoxifyText error", err);
         sendResponse({ success: false, error: String(err) });
@@ -190,5 +231,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Keep the channel open for the async response
     return true;
+  }
+});
+
+// Accept persistent connections from content scripts to keep service worker alive
+chrome.runtime.onConnect.addListener((port) => {
+  try {
+    const name = port.name || Math.random().toString(36).slice(2);
+    connectedPorts.set(name, port);
+    console.log('Port connected:', name);
+
+    port.onMessage.addListener((m) => {
+      // simple ping handler
+      if (m && m.type === 'keepAlivePing') {
+        port.postMessage({ type: 'keepAlivePong' });
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      connectedPorts.delete(name);
+      console.log('Port disconnected:', name);
+    });
+  } catch (err) {
+    console.warn('onConnect handler error', err);
   }
 });

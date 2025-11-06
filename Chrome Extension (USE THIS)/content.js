@@ -34,40 +34,115 @@ const updateDetoxBadge = (count) => {
   }, 3000);
 };
 
+// Helper to send messages to background with retries and exponential backoff
+const sendBgMessageWithRetry = async (msg, maxAttempts = 3, baseDelay = 1000) => {
+  // If we have a persistent port, prefer posting to it for lower chance of 'no response'
+  const tryPostToPort = () => {
+    try {
+      // attempt to post to any connected port
+      for (const [, port] of window.__connectedPorts || []) {
+        try {
+          port.postMessage(msg);
+        } catch (err) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await new Promise((resolve) => {
+        let called = false;
+        chrome.runtime.sendMessage(msg, (response) => {
+          called = true;
+          // Check runtime.lastError too
+          if (chrome.runtime.lastError) {
+            // pass the error string as undefined result so outer retry handles it
+            resolve({ __error: chrome.runtime.lastError.message });
+            return;
+          }
+          resolve(response);
+        });
+
+        // In case callback never fires (service worker killed), set a timeout to resolve undefined
+        setTimeout(() => {
+          if (!called) resolve(undefined);
+        }, baseDelay * 2);
+      });
+
+      // handle explicit runtime.lastError wrapper
+      if (res && res.__error) {
+        // if extension context invalidated, retry after a short backoff
+        if (String(res.__error).includes('Extension context invalidated')) {
+          if (attempt < maxAttempts) await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
+          continue;
+        }
+        // otherwise return as failure
+        return { success: false, error: res.__error };
+      }
+
+      if (!res) {
+        // try posting to ports as fallback
+        tryPostToPort();
+        if (attempt < maxAttempts) await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (String(err).includes('Extension context invalidated')) {
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
+          continue;
+        }
+      }
+      if (attempt < maxAttempts) await new Promise(r => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
+      else throw err;
+    }
+  }
+  return undefined;
+};
+
+// Create a persistent port to background to help keep service worker alive
+let keepAlivePort = null;
+try {
+  keepAlivePort = chrome.runtime.connect({ name: 'keepAlive' });
+  // store minimal reference for port-based fallback
+  if (!window.__connectedPorts) window.__connectedPorts = [];
+  window.__connectedPorts.push(['keepAlive', keepAlivePort]);
+  // ping periodically
+  setInterval(() => {
+    try { keepAlivePort.postMessage({ type: 'keepAlivePing' }); } catch (e) { /* ignore */ }
+  }, 28000);
+  keepAlivePort.onMessage.addListener((m) => {
+    // optional: handle keepAlivePong
+    if (m && m.type === 'keepAlivePong') return;
+  });
+} catch (err) {
+  // connecting can fail in some environments, ignore
+}
+
 // Check if text is toxic using the classification endpoint
 const classifyText = async (text) => {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.runtime.sendMessage({ type: 'classifyText', text }, (response) => {
-        if (!response) return reject('No response from background worker');
-        if (response.success) {
-          resolve(response.isToxic);
-        } else {
-          reject(response.error || 'Classification failed');
-        }
-      });
-    } catch (err) {
-      reject(err);
-    }
-  });
+  // Use the background retry wrapper for single-item classification as well
+  const response = await sendBgMessageWithRetry({ type: 'classifyText', text }, 3, 3000);
+  if (!response) throw new Error('No response from background worker');
+  if (response.success) return response.isToxic;
+  throw new Error(response.error || 'Classification failed');
 };
 
 // Batch classify multiple texts
 const classifyTexts = async (texts) => {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.runtime.sendMessage({ type: 'classifyText', texts }, (response) => {
-        if (!response) return reject('No response from background worker');
-        if (response.success) {
-          resolve(response.results);
-        } else {
-          reject(response.error || 'Classification failed');
-        }
-      });
-    } catch (err) {
-      reject(err);
-    }
-  });
+  try {
+  const response = await sendBgMessageWithRetry({ type: 'classifyText', texts }, 3, 3000);
+    if (!response) throw new Error('No response from background worker after retries');
+    if (response.success) return response.results;
+    throw new Error(response.error || 'Classification failed');
+  } catch (err) {
+    throw err;
+  }
 };
 
 // Replace the keyword-based detoxify with a remote detoxifier call.
@@ -82,6 +157,18 @@ let batchTimer = null;
 let requestIdCounter = 1;
 // Total count across page lifetime
 let totalDetoxified = 0;
+
+// Track processed text hashes to avoid subtle duplicates
+const processedHashes = new Set();
+
+function hashString(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h.toString(16);
+}
 
 // Results panel UI (green = captured but unchanged, red = changed before/after)
 const createResultsPanel = () => {
@@ -234,7 +321,7 @@ const flushBatch = async () => {
     const toxicItems = items.filter((_, idx) => toxicResults[idx]);
     const nonToxicItems = items.filter((_, idx) => !toxicResults[idx]);
 
-    // Non-toxic items: highlight on page, but do not log for popup
+    // Non-toxic items: highlight on page, and log for popup
     nonToxicItems.forEach(it => {
       try {
         const span = document.createElement('span');
@@ -246,6 +333,17 @@ const flushBatch = async () => {
           it.nodes.forEach(n => n.parentNode?.removeChild(n));
           parent.appendChild(span);
           markDetoxified(parent);
+
+          // Log non-toxic block for popup dropdown
+          chrome.runtime.sendMessage({
+            type: "logDetected",
+            payload: {
+              text: it.text,
+              isToxic: false,
+              timestamp: new Date().toISOString()
+            }
+          });
+          addCapturedEntry(it.text);
         }
       } catch (err) {
         console.error('Error processing non-toxic text:', err);
@@ -254,7 +352,8 @@ const flushBatch = async () => {
 
     if (toxicItems.length > 0) {
       const toxicTexts = toxicItems.map(i => i.text);
-      chrome.runtime.sendMessage({ type: 'detoxifyText', texts: toxicTexts }, (response) => {
+      try {
+  const response = await sendBgMessageWithRetry({ type: 'detoxifyText', texts: toxicTexts }, 3, 3000);
         if (!response) {
           console.error('No response from background for batch');
           return;
@@ -265,8 +364,12 @@ const flushBatch = async () => {
         }
 
         const outputs = response.outputs || [];
+        const attemptsArr = response.attempts || [];
+        const errorsArr = response.errors || [];
         toxicItems.forEach((it, idx) => {
           const out = outputs[idx] && outputs[idx].length > 0 ? outputs[idx] : it.text;
+          const attempts = attemptsArr[idx] || 0;
+          const error = errorsArr[idx] || null;
           try {
             const span = document.createElement('span');
             span.textContent = out;
@@ -281,8 +384,20 @@ const flushBatch = async () => {
               chrome.runtime.sendMessage({
                 type: "logDetox",
                 payload: {
+                  id: it.id,
                   original: it.text,
                   detoxified: out,
+                  attempts,
+                  error,
+                  timestamp: new Date().toISOString()
+                }
+              });
+              // Also log as detected (toxic) for dropdown
+              chrome.runtime.sendMessage({
+                type: "logDetected",
+                payload: {
+                  text: it.text,
+                  isToxic: true,
                   timestamp: new Date().toISOString()
                 }
               });
@@ -294,7 +409,9 @@ const flushBatch = async () => {
             console.error('Error applying detoxified text for item', it, err);
           }
         });
-      });
+      } catch (err) {
+        console.error('Error calling detoxifyText (sendBgMessageWithRetry):', err);
+      }
     }
   } catch (err) {
     console.error('Error during batch classification:', err);
@@ -303,19 +420,13 @@ const flushBatch = async () => {
 
 
 const enqueueForDetox = (nodes, text) => {
-  // Skip if parent block already detoxified
   const parent = nodes[0] && nodes[0].parentNode;
   if (isAlreadyDetoxified(parent)) return;
 
   const id = requestIdCounter++;
   batchQueue.push({ id, nodes, text });
 
-  if (batchQueue.length >= BATCH_SIZE) {
-    flushBatch();
-  } else {
-    if (batchTimer) clearTimeout(batchTimer);
-    batchTimer = setTimeout(() => flushBatch(), BATCH_DELAY_MS);
-  }
+  flushBatch(); // ← flush immediately
 };
 
 const isVisible = el => {
@@ -348,7 +459,7 @@ const scanBlockElements = (root = document.body) => {
 
         // Only filter by length
         const len = text.length;
-        if (len < 20 || len > 1000) return NodeFilter.FILTER_REJECT;
+        if (len < 15 || len > 1000) return NodeFilter.FILTER_REJECT;
 
         return NodeFilter.FILTER_ACCEPT;
       }
@@ -389,6 +500,10 @@ const scanBlockElements = (root = document.body) => {
   textGroups.forEach((nodes, parent) => {
     if (!isAlreadyDetoxified(parent)) {
       const text = nodes.map(n => n.textContent).join(' ').trim();
+      // dedupe by hash to avoid subtle duplicates across similar blocks
+      const h = hashString(text);
+      if (processedHashes.has(h)) return;
+      processedHashes.add(h);
       processTextBlock({ nodes, originalText: text });
     }
   });
@@ -409,6 +524,23 @@ new MutationObserver(mutations => {
   if (hasNewContent) scanBlockElements();
 }).observe(document.body, { childList: true, subtree: true });
 
+// Re-observe newly added elements so IntersectionObserver watches them too
+const mutationObserver = new MutationObserver(mutations => {
+  for (const m of mutations) {
+    for (const node of Array.from(m.addedNodes || [])) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      try {
+        // observe new element and its children
+        intersectionObserver.observe(node);
+        node.querySelectorAll && node.querySelectorAll('*').forEach(el => intersectionObserver.observe(el));
+      } catch (err) {
+        // ignore
+      }
+    }
+  }
+});
+mutationObserver.observe(document.body, { childList: true, subtree: true });
+
 const intersectionObserver = new IntersectionObserver(entries => {
   entries.forEach(entry => {
     if (entry.isIntersecting) scanBlockElements(entry.target);
@@ -425,6 +557,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'removeHighlight') {
     textElements.forEach(el => removeHighlight(el));
   }
+  else if (message.type === 'triggerRescan') {
+    // Force a rescan of the current document and enqueue texts for classification
+    try {
+      scanBlockElements();
+      sendResponse({ success: true });
+    } catch (err) {
+      sendResponse({ success: false, error: String(err) });
+    }
+    return true;
+  }
 });
 
 let lastUrl = location.href;
@@ -435,3 +577,23 @@ setInterval(() => {
     scanBlockElements();
   }
 }, 1000);
+
+// Flush batch and clear timers on unload/navigation to avoid dangling async work
+window.addEventListener('beforeunload', () => {
+  try {
+    if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+    if (batchQueue.length > 0) {
+      // attempt a final flush synchronously is not possible; clear queue
+      batchQueue.length = 0;
+    }
+  } catch (err) {
+    console.warn('beforeunload cleanup failed', err);
+  }
+});
+
+// Also handle visibilitychange to cancel/flush when user navigates away
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+  }
+});

@@ -1,128 +1,118 @@
-// Keep track of highlighted elements on the page
-let currentHighlight = null;
+// --- UI Elements ---
+const detoxTableBody = document.getElementById('detoxTableBody');
+const changedCount = document.getElementById('changedCount');
+const rescanBtn = document.getElementById('rescan');
+const scanStatus = document.getElementById('scanStatus');
+const allScannedDropdown = document.getElementById('allScannedDropdown');
 
-// Create highlighted text display
-const highlightDisplay = document.createElement('div');
-highlightDisplay.id = 'highlightDisplay';
-highlightDisplay.style.padding = '8px';
-highlightDisplay.style.marginBottom = '10px';
-highlightDisplay.style.borderRadius = '4px';
-highlightDisplay.style.backgroundColor = '#f8f9fa';
-highlightDisplay.style.display = 'none';
-document.body.insertBefore(highlightDisplay, document.body.firstChild);
+let scanInterval = 1000; // ms
+let scanTimer = null;
+let nextScanTime = null;
 
-// Function to update the tables
-function updateTables(detoxLog = [], detectedLog = []) {
-  // Only update changed (toxic → detoxified) table and counter
-  document.getElementById('changedCount').textContent = detoxLog.length;
+// --- Messaging helpers ---
+function sendMessageToTab(msg) {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]) return resolve(undefined);
+      const tabId = tabs[0].id;
+      chrome.tabs.sendMessage(tabId, msg, (res) => {
+        if (chrome.runtime.lastError) return resolve(undefined);
+        resolve(res);
+      });
+    });
+  });
+}
 
-  const detoxBody = document.getElementById('detoxTableBody');
-  detoxBody.innerHTML = '';
-  if (detoxLog.length === 0) {
-    const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="2" style="text-align:center">No detoxified messages yet.</td>`;
-    detoxBody.appendChild(row);
+function sendToBackground(msg) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(msg, (res) => {
+      if (chrome.runtime.lastError) return resolve(undefined);
+      resolve(res);
+    });
+  });
+}
+
+// --- UI rendering ---
+function renderDetoxTable(pairs) {
+  detoxTableBody.innerHTML = '';
+  if (!pairs || !pairs.length) {
+    changedCount.textContent = '0';
+    return;
+  }
+  changedCount.textContent = pairs.length;
+  for (const p of pairs) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="background:#ffecec;">${escapeHtml(p.original)}</td>
+      <td style="background:#e6ffed;">${escapeHtml(p.detoxified)}${p.attempts ? ` <span style='color:#888;font-size:11px;'>(Attempts: ${p.attempts}${p.error ? ', Error: ' + escapeHtml(p.error) : ''})</span>` : ''}</td>
+    `;
+    detoxTableBody.appendChild(tr);
+  }
+}
+
+function renderAllScannedDropdown(allScanned) {
+  allScannedDropdown.innerHTML = '';
+  if (!allScanned || !allScanned.length) {
+    allScannedDropdown.innerHTML = '<option>No text scanned yet</option>';
+    return;
+  }
+  for (const item of allScanned) {
+    const opt = document.createElement('option');
+    opt.textContent = item.text;
+    opt.style.background = item.isToxic ? '#ffecec' : '#e6ffed';
+    opt.style.color = item.isToxic ? '#b30000' : '#006600';
+    allScannedDropdown.appendChild(opt);
+  }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, function (c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+  });
+}
+
+// --- Scan timer ---
+function updateScanStatus() {
+  if (nextScanTime) {
+    const ms = Math.max(0, nextScanTime - Date.now());
+    scanStatus.textContent = `Rescanning ${Math.ceil(ms / 1000)}sec`;
   } else {
-    detoxLog.forEach(({ original, detoxified, id }) => {
-      const row = document.createElement('tr');
-      row.dataset.textId = id;
-      row.innerHTML = `
-        <td style="background-color: #ffecec">${original}</td>
-        <td style="background-color: #e6ffed">${detoxified}</td>
-      `;
-      row.addEventListener('mouseenter', () => {
-        highlightText(id);
-        highlightDisplay.textContent = original;
-        highlightDisplay.style.display = 'block';
-      });
-      row.addEventListener('mouseleave', () => {
-        removeHighlight();
-        highlightDisplay.style.display = 'none';
-      });
-      row.addEventListener('click', () => {
-        removeHighlight();
-        highlightDisplay.style.display = 'none';
-      });
-      detoxBody.appendChild(row);
-    });
+    scanStatus.textContent = '';
   }
 }
 
-// Debounce function
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
+function scheduleNextScan() {
+  if (scanTimer) clearTimeout(scanTimer);
+  nextScanTime = Date.now() + scanInterval;
+  updateScanStatus();
+  scanTimer = setTimeout(() => {
+    triggerRescan();
+  }, scanInterval);
 }
 
-// Function to highlight text on the page
-const highlightText = debounce((id) => {
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (!tabs[0]?.id) return;
-    chrome.tabs.sendMessage(tabs[0].id, { 
-      type: 'highlightText', 
-      id 
-    });
-  });
-}, 100);
-
-// Function to remove highlight
-function removeHighlight() {
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (!tabs[0]?.id) return;
-    chrome.tabs.sendMessage(tabs[0].id, { 
-      type: 'removeHighlight' 
-    });
-  });
+// --- Main logic ---
+async function loadAndRender() {
+  // Get toxic/detox pairs and all scanned text from background
+  const res = await sendToBackground({ type: 'getDetoxLog' });
+  if (!res) return;
+  renderDetoxTable(res.pairs || []);
+  renderAllScannedDropdown(res.allScanned || []);
 }
 
-// Clear buttons event handlers
-document.getElementById('clearDetected').addEventListener('click', () => {
-  // First remove any active highlights
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (!tabs[0]?.id) return;
-    chrome.tabs.sendMessage(tabs[0].id, { type: 'removeHighlight' });
-  });
+async function triggerRescan() {
+  scanStatus.textContent = 'Rescanning...';
+  await sendMessageToTab({ type: 'triggerRescan' });
+  setTimeout(loadAndRender, 500);
+  scheduleNextScan();
+}
 
-  // Then clear the entries
-  chrome.runtime.sendMessage({ type: 'clearDetected' }, () => {
-    chrome.runtime.sendMessage({ type: "getDetoxLog" }, response => {
-      updateTables(response.detoxLog, []);
-    });
-  });
-});
-
-document.getElementById('clearChanged').addEventListener('click', () => {
-  // First remove any active highlights
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (!tabs[0]?.id) return;
-    chrome.tabs.sendMessage(tabs[0].id, { type: 'removeHighlight' });
-  });
-
-  // Then clear the entries
-  chrome.runtime.sendMessage({ type: 'clearChanged' }, () => {
-    chrome.runtime.sendMessage({ type: "getDetoxLog" }, response => {
-      updateTables([], response.detectedLog);
-    });
-  });
-});
-
-// Update tables when URL changes
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.url) {
-    chrome.runtime.sendMessage({ type: "getDetoxLog" }, response => {
-      updateTables(response.detoxLog || [], response.detectedLog || []);
-    });
-  }
+rescanBtn.addEventListener('click', () => {
+  triggerRescan();
 });
 
 // Initial load
-chrome.runtime.sendMessage({ type: "getDetoxLog" }, response => {
-  updateTables(response.detoxLog || [], response.detectedLog || []);
-});
+loadAndRender();
+scheduleNextScan();
+
+// Update scan status every 200ms
+setInterval(updateScanStatus, 200);

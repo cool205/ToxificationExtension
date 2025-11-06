@@ -67,34 +67,31 @@
   </style>
 </head>
 <body>
-  <h2>
-    Changed Text (<span id="changedCount" style="margin: 0 5px">0</span>)
-    <button class="clear-btn" id="clearChanged">Clear & Unhighlight</button>
-  </h2>
-  <div style="margin-bottom: 20px">
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 50%; background-color: #ffecec;">Original (Toxic)</th>
-          <th style="width: 50%; background-color: #e6ffed;">Detoxified</th>
-        </tr>
-      </thead>
-      <tbody id="detoxTableBody"></tbody>
-    </table>
+  <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-weight:600">Toxic → Detoxified (<span id="changedCount">0</span>)</div>
+    <div>
+      <button class="clear-btn" id="rescan">Rescan page</button>
+    </div>
   </div>
 
-  <h2>
-    Scanned Text (Unchanged) (<span id="detectedCount" style="margin: 0 5px">0</span>)
-    <button class="clear-btn" id="clearDetected">Clear & Unhighlight</button>
-  </h2>
   <table>
     <thead>
       <tr>
-        <th style="width: 100%; background-color: #e6ffed;">Non-Toxic Text</th>
+        <th style="width: 50%; background-color: #ffecec;">Original (Toxic)</th>
+        <th style="width: 50%; background-color: #e6ffed;">Detoxified (Attempts / Error)</th>
       </tr>
     </thead>
-    <tbody id="detectedTableBody"></tbody>
+    <tbody id="detoxTableBody"></tbody>
   </table>
+
+  <div id="scanStatus" style="margin-bottom:8px;font-size:14px;color:#555;"></div>
+  <div style="margin-top:12px">
+    <label for="allScannedDropdown" style="font-weight:600;">All scanned text:</label>
+    <select id="allScannedDropdown" style="width:100%;margin-top:4px;padding:6px 4px;font-size:13px;">
+      <option>Loading...</option>
+    </select>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
