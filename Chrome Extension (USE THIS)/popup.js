@@ -3,7 +3,9 @@ const detoxTableBody = document.getElementById('detoxTableBody');
 const changedCount = document.getElementById('changedCount');
 const rescanBtn = document.getElementById('rescan');
 const scanStatus = document.getElementById('scanStatus');
-const allScannedDropdown = document.getElementById('allScannedDropdown');
+
+const capturedList = document.getElementById('detox-captured-list');
+const changedList = document.getElementById('detox-changed-list');
 
 let scanInterval = 1000; // ms
 let scanTimer = null;
@@ -50,18 +52,44 @@ function renderDetoxTable(pairs) {
   }
 }
 
-function renderAllScannedDropdown(allScanned) {
-  allScannedDropdown.innerHTML = '';
-  if (!allScanned || !allScanned.length) {
-    allScannedDropdown.innerHTML = '<option>No text scanned yet</option>';
-    return;
+
+function renderResultsPanel(allScanned, pairs) {
+  // Render captured (unchanged, non-toxic)
+  capturedList.innerHTML = '';
+  if (allScanned && allScanned.length) {
+    for (const item of allScanned) {
+      if (!item.isToxic) {
+        const div = document.createElement('div');
+        div.style.background = '#e6ffed';
+        div.style.padding = '6px';
+        div.style.borderRadius = '4px';
+        div.style.wordBreak = 'break-word';
+        div.textContent = item.text;
+        capturedList.prepend(div);
+      }
+    }
   }
-  for (const item of allScanned) {
-    const opt = document.createElement('option');
-    opt.textContent = item.text;
-    opt.style.background = item.isToxic ? '#ffecec' : '#e6ffed';
-    opt.style.color = item.isToxic ? '#b30000' : '#006600';
-    allScannedDropdown.appendChild(opt);
+  // Render changed (toxic/detoxified)
+  changedList.innerHTML = '';
+  if (pairs && pairs.length) {
+    for (const p of pairs) {
+      const div = document.createElement('div');
+      div.style.background = '#fff0f0';
+      div.style.padding = '6px';
+      div.style.borderRadius = '4px';
+      div.style.wordBreak = 'break-word';
+      const before = document.createElement('div');
+      before.style.textDecoration = 'line-through';
+      before.style.color = '#8b0000';
+      before.textContent = p.original;
+      const after = document.createElement('div');
+      after.style.marginTop = '4px';
+      after.style.color = '#006400';
+      after.textContent = p.detoxified;
+      div.appendChild(before);
+      div.appendChild(after);
+      changedList.prepend(div);
+    }
   }
 }
 
@@ -96,7 +124,7 @@ async function loadAndRender() {
   const res = await sendToBackground({ type: 'getDetoxLog' });
   if (!res) return;
   renderDetoxTable(res.pairs || []);
-  renderAllScannedDropdown(res.allScanned || []);
+  renderResultsPanel(res.allScanned || [], res.pairs || []);
 }
 
 async function triggerRescan() {
