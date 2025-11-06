@@ -1,70 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 10px;
-      width: 600px;
-      height: 600px;
-      font-family: system-ui, -apple-system, sans-serif;
-      overflow: auto;
-    }
-
-    h2 {
-      margin-top: 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .clear-btn {
-      font-size: 12px;
-      padding: 4px 12px;
-      border: 1px solid #ccc;
-      background: white;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .clear-btn:hover {
-      background: #f0f0f0;
-      border-color: #999;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-      margin-bottom: 20px;
-    }
-
-    th, td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      word-wrap: break-word;
-      white-space: pre-wrap;
-      vertical-align: top;
-      transition: background-color 0.2s;
-    }
-
-    td:hover {
-      filter: brightness(0.95);
-    }
-
-    th {
-      background-color: #f0f0f0;
-    }
-    
-    tr[data-text-id] {
-      cursor: pointer;
-    }
-
-    tr[data-text-id]:hover td {
-      filter: brightness(0.95);
-    }
-  </style>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -93,7 +30,7 @@
         <div id="detox-captured-list" style="display:flex;flex-direction:column;gap:6px;"></div>
       </div>
       <div style="flex:1;">
-        <div style="background:#ffecec;padding:4px;border-radius:4px;margin-bottom:4px;">Changed (before → after)</div>
+        <div style="background:#ffecec;padding:4px;border-radius:4px;margin-bottom:4px;">Changed (before => after)</div>
         <div id="detox-changed-list" style="display:flex;flex-direction:column;gap:6px;"></div>
       </div>
     </div>
