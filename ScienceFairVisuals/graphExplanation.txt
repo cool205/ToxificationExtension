@@ -1,0 +1,24 @@
+
+=========  Model Graphs  =========
+
+Classification
+
+2X4Full: Part of the 120 Model Run and shows validation accuracy of all the possible combination of hyperparamters. Heatmap gives visualization and is exponential to highlight the top few
+120RunAll: Same as 2X4, although graphed in 3D to remove one dimension. Color represents accuracy.
+ClassifyDistilledAcc: Accuracy for Classify Distilled Model, part of model choosing
+classifyDistilledLoss: Loss for Classify Distilled Model, part of model choosing
+t5ModelAcc: Accuracy for t5 Model, part of model choosing
+t5ModelLoss: Loss for t5 Model, part of model choosing
+Final Accuarcy Graph: Accuracy for final classification model used in chrome extension
+Final Loss Graph: Loss for final classification model used in chrome extension
+
+Generation
+
+Detox3Epoch: First Model trained with 3 Epochs
+Detox5Epoch: Model trained with 5 Epochs (Currently used in Chrome Extension)
+
+
+=========  Others  =========
+
+DetoxExample: Shows that Detox Model just repeats it and doesn't detoxify it
+CaptureExample: Shows what text gets captured on a webpage. Some text left out, mostly correct
