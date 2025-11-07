@@ -59,10 +59,12 @@ async function classifyText(text) {
     if (!res.success) return { success: false, error: res.error, attempts: res.attempts };
 
     const response = res.json;
+    // Check toxic confidence threshold from response confidence object
+    const toxicConfidence = response?.confidence?.toxic || 0;
     return {
       success: true,
-      isToxic: response?.toxic === true,
-      confidence: response?.confidence || {},
+      isToxic: toxicConfidence >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD,
+      confidence: toxicConfidence,
       attempts: res.attempts
     };
   } catch (err) {

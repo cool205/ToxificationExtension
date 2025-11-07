@@ -1,10 +1,7 @@
 // --- UI Elements ---
-const detoxTableBody = document.getElementById('detoxTableBody');
 const changedCount = document.getElementById('changedCount');
 const rescanBtn = document.getElementById('rescan');
 const scanStatus = document.getElementById('scanStatus');
-
-const capturedList = document.getElementById('detox-captured-list');
 const changedList = document.getElementById('detox-changed-list');
 
 let scanInterval = 1000; // ms
@@ -53,42 +50,40 @@ function renderDetoxTable(pairs) {
 }
 
 
-function renderResultsPanel(allScanned, pairs) {
-  // Render captured (unchanged, non-toxic)
-  capturedList.innerHTML = '';
-  if (allScanned && allScanned.length) {
-    for (const item of allScanned) {
-      if (!item.isToxic) {
-        const div = document.createElement('div');
-        div.style.background = '#e6ffed';
-        div.style.padding = '6px';
-        div.style.borderRadius = '4px';
-        div.style.wordBreak = 'break-word';
-        div.textContent = item.text;
-        capturedList.prepend(div);
-      }
-    }
-  }
-  // Render changed (toxic/detoxified)
+function renderResultsPanel(pairs) {
   changedList.innerHTML = '';
+  changedCount.textContent = pairs?.length || 0;
+  
   if (pairs && pairs.length) {
     for (const p of pairs) {
       const div = document.createElement('div');
       div.style.background = '#fff0f0';
-      div.style.padding = '6px';
+      div.style.padding = '12px';
       div.style.borderRadius = '4px';
       div.style.wordBreak = 'break-word';
+      div.style.marginBottom = '8px';
+      
       const before = document.createElement('div');
-      before.style.textDecoration = 'line-through';
-      before.style.color = '#8b0000';
+      before.style.color = '#b30000';
       before.textContent = p.original;
+      
       const after = document.createElement('div');
-      after.style.marginTop = '4px';
+      after.style.marginTop = '8px';
       after.style.color = '#006400';
       after.textContent = p.detoxified;
+      
+      if (p.attempts) {
+        const info = document.createElement('div');
+        info.style.marginTop = '4px';
+        info.style.fontSize = '11px';
+        info.style.color = '#666';
+        info.textContent = `Attempts: ${p.attempts}${p.error ? ' | Error: ' + p.error : ''}`;
+        after.appendChild(info);
+      }
+      
       div.appendChild(before);
       div.appendChild(after);
-      changedList.prepend(div);
+      changedList.appendChild(div);
     }
   }
 }
@@ -120,11 +115,10 @@ function scheduleNextScan() {
 
 // --- Main logic ---
 async function loadAndRender() {
-  // Get toxic/detox pairs and all scanned text from background
+  // Get toxic/detox pairs from background
   const res = await sendToBackground({ type: 'getDetoxLog' });
   if (!res) return;
-  renderDetoxTable(res.pairs || []);
-  renderResultsPanel(res.allScanned || [], res.pairs || []);
+  renderResultsPanel(res.pairs || []);
 }
 
 async function triggerRescan() {

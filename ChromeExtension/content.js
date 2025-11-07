@@ -107,22 +107,57 @@ const sendBgMessageWithRetry = async (msg, maxAttempts = 3, baseDelay = 1000) =>
 
 // Create a persistent port to background to help keep service worker alive
 let keepAlivePort = null;
-try {
-  keepAlivePort = chrome.runtime.connect({ name: 'keepAlive' });
-  // store minimal reference for port-based fallback
-  if (!window.__connectedPorts) window.__connectedPorts = [];
-  window.__connectedPorts.push(['keepAlive', keepAlivePort]);
-  // ping periodically
-  setInterval(() => {
-    try { keepAlivePort.postMessage({ type: 'keepAlivePing' }); } catch (e) { /* ignore */ }
-  }, 28000);
-  keepAlivePort.onMessage.addListener((m) => {
-    // optional: handle keepAlivePong
-    if (m && m.type === 'keepAlivePong') return;
-  });
-} catch (err) {
-  // connecting can fail in some environments, ignore
+
+function connectPort() {
+  try {
+    if (keepAlivePort) {
+      try { keepAlivePort.disconnect(); } catch (e) { /* ignore */ }
+    }
+    keepAlivePort = chrome.runtime.connect({ name: 'keepAlive' });
+    
+    // store reference for fallback
+    if (!window.__connectedPorts) window.__connectedPorts = [];
+    const existingIdx = window.__connectedPorts.findIndex(([name]) => name === 'keepAlive');
+    if (existingIdx >= 0) window.__connectedPorts.splice(existingIdx, 1);
+    window.__connectedPorts.push(['keepAlive', keepAlivePort]);
+    
+    // Handle port errors and reconnect
+    keepAlivePort.onDisconnect.addListener(() => {
+      const error = chrome.runtime.lastError;
+      console.log('Port disconnected:', error?.message);
+      // Try to reconnect unless the page is being unloaded
+      if (document.visibilityState !== 'hidden') {
+        setTimeout(connectPort, 1000);
+      }
+    });
+
+    // Ping to keep alive
+    const pingInterval = setInterval(() => {
+      try {
+        keepAlivePort.postMessage({ type: 'keepAlivePing' });
+      } catch (e) {
+        clearInterval(pingInterval);
+        if (document.visibilityState !== 'hidden') {
+          connectPort();
+        }
+      }
+    }, 28000);
+
+    keepAlivePort.onMessage.addListener((m) => {
+      if (m && m.type === 'keepAlivePong') return;
+    });
+
+  } catch (err) {
+    console.warn('Port connection failed:', err);
+    // Try to reconnect unless the page is being unloaded
+    if (document.visibilityState !== 'hidden') {
+      setTimeout(connectPort, 1000);
+    }
+  }
 }
+
+// Initial connection
+connectPort();
 
 // Check if text is toxic using the classification endpoint
 const classifyText = async (text) => {
@@ -170,112 +205,7 @@ function hashString(s) {
   return h.toString(16);
 }
 
-// Results panel UI (green = captured but unchanged, red = changed before/after)
-const createResultsPanel = () => {
-  if (document.getElementById('detox-results-panel')) return;
-
-  const panel = document.createElement('div');
-  panel.id = 'detox-results-panel';
-  panel.style.position = 'fixed';
-  panel.style.left = '12px';
-  panel.style.bottom = '12px';
-  panel.style.width = '360px';
-  panel.style.maxHeight = '48vh';
-  panel.style.overflow = 'auto';
-  panel.style.background = 'rgba(255,255,255,0.95)';
-  panel.style.border = '1px solid rgba(0,0,0,0.12)';
-  panel.style.borderRadius = '8px';
-  panel.style.padding = '8px';
-  panel.style.zIndex = '10000';
-  panel.style.fontSize = '12px';
-  panel.style.boxShadow = '0 6px 18px rgba(0,0,0,0.12)';
-
-  const title = document.createElement('div');
-  title.textContent = 'Detox Results';
-  title.style.fontWeight = '600';
-  title.style.marginBottom = '6px';
-  panel.appendChild(title);
-
-  const lists = document.createElement('div');
-  lists.style.display = 'flex';
-  lists.style.gap = '8px';
-
-  const capturedCol = document.createElement('div');
-  capturedCol.style.flex = '1';
-  const capHeader = document.createElement('div');
-  capHeader.textContent = 'Captured (unchanged)';
-  capHeader.style.background = '#e6ffed';
-  capHeader.style.padding = '4px';
-  capHeader.style.borderRadius = '4px';
-  capHeader.style.marginBottom = '4px';
-  capturedCol.appendChild(capHeader);
-  const capList = document.createElement('div');
-  capList.id = 'detox-captured-list';
-  capList.style.display = 'flex';
-  capList.style.flexDirection = 'column';
-  capList.style.gap = '6px';
-  capturedCol.appendChild(capList);
-
-  const changedCol = document.createElement('div');
-  changedCol.style.flex = '1';
-  const chHeader = document.createElement('div');
-  chHeader.textContent = 'Changed (before → after)';
-  chHeader.style.background = '#ffecec';
-  chHeader.style.padding = '4px';
-  chHeader.style.borderRadius = '4px';
-  chHeader.style.marginBottom = '4px';
-  changedCol.appendChild(chHeader);
-  const chList = document.createElement('div');
-  chList.id = 'detox-changed-list';
-  chList.style.display = 'flex';
-  chList.style.flexDirection = 'column';
-  chList.style.gap = '6px';
-  changedCol.appendChild(chList);
-
-  lists.appendChild(capturedCol);
-  lists.appendChild(changedCol);
-  panel.appendChild(lists);
-
-  document.body.appendChild(panel);
-};
-
-const addCapturedEntry = (text) => {
-  createResultsPanel();
-  const list = document.getElementById('detox-captured-list');
-  if (!list) return;
-  const item = document.createElement('div');
-  item.style.background = '#e6ffed';
-  item.style.padding = '6px';
-  item.style.borderRadius = '4px';
-  item.style.wordBreak = 'break-word';
-  item.textContent = text;
-  list.prepend(item);
-};
-
-const addChangedEntry = (original, changed) => {
-  createResultsPanel();
-  const list = document.getElementById('detox-changed-list');
-  if (!list) return;
-  const item = document.createElement('div');
-  item.style.background = '#fff0f0';
-  item.style.padding = '6px';
-  item.style.borderRadius = '4px';
-  item.style.wordBreak = 'break-word';
-
-  const before = document.createElement('div');
-  before.style.textDecoration = 'line-through';
-  before.style.color = '#8b0000';
-  before.textContent = original;
-
-  const after = document.createElement('div');
-  after.style.marginTop = '4px';
-  after.style.color = '#006400';
-  after.textContent = changed;
-
-  item.appendChild(before);
-  item.appendChild(after);
-  list.prepend(item);
-};
+// No external panel needed - results show in popup only
 
 // Tracking and error prevention
 let processingError = false;
@@ -321,20 +251,14 @@ const flushBatch = async () => {
     const toxicItems = items.filter((_, idx) => toxicResults[idx]);
     const nonToxicItems = items.filter((_, idx) => !toxicResults[idx]);
 
-    // Non-toxic items: highlight on page, and log for popup
+    // Non-toxic items: just mark as processed without visual changes
     nonToxicItems.forEach(it => {
       try {
-        const span = document.createElement('span');
-        span.textContent = it.text;
-        span.style.backgroundColor = '#e6ffed';
-
         const parent = it.nodes[0] && it.nodes[0].parentNode;
         if (parent) {
-          it.nodes.forEach(n => n.parentNode?.removeChild(n));
-          parent.appendChild(span);
           markDetoxified(parent);
 
-          // Log non-toxic block for popup dropdown
+          // Log non-toxic block for background tracking
           chrome.runtime.sendMessage({
             type: "logDetected",
             payload: {
@@ -343,7 +267,6 @@ const flushBatch = async () => {
               timestamp: new Date().toISOString()
             }
           });
-          addCapturedEntry(it.text);
         }
       } catch (err) {
         console.error('Error processing non-toxic text:', err);
@@ -403,7 +326,6 @@ const flushBatch = async () => {
               });
               totalDetoxified += 1;
               updateDetoxBadge(totalDetoxified);
-              addChangedEntry(it.text, out);
             }
           } catch (err) {
             console.error('Error applying detoxified text for item', it, err);
