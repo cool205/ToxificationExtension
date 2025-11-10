@@ -33,13 +33,38 @@ def generate_response(toxic_input):
 
 # Feedback saving
 def save_feedback(toxic_input, detox_response, rating):
+    """Save user ratings to user_ratings.json for retraining."""
     feedback = {
+        "toxic": toxic_input.strip(),
+        "detoxified": detox_response.strip(),
+        "rating": int(rating)
+    }
+    ratings_file = Path(__file__).parent / "user_ratings.json"
+    
+    # Load existing ratings or create new list
+    ratings = []
+    if ratings_file.exists():
+        try:
+            with open(ratings_file, "r") as f:
+                ratings = json.load(f)
+        except:
+            ratings = []
+    
+    # Append new rating
+    ratings.append(feedback)
+    
+    # Save back to file
+    with open(ratings_file, "w") as f:
+        json.dump(ratings, f, indent=2)
+    
+    # Also keep legacy feedback format for reference
+    legacy_feedback = {
         "text": f"Toxic Version: {toxic_input}\nNeutral Version: {detox_response}",
         "rating": int(rating)
     }
     os.makedirs("feedback", exist_ok=True)
     with open("feedback/train.jsonl", "a") as f:
-        f.write(json.dumps(feedback) + "\n")
+        f.write(json.dumps(legacy_feedback) + "\n")
 
 # Routes
 @app.route("/", methods=["GET", "POST"])
