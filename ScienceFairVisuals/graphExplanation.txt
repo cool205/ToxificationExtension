@@ -15,7 +15,9 @@ Final Loss Graph: Loss for final classification model used in chrome extension
 Generation
 
 Detox3Epoch: First Model trained with 3 Epochs
-Detox5Epoch: Model trained with 5 Epochs (Currently used in Chrome Extension)
+Detox5Epoch: Model trained with 5 Epochs
+DetoxRun2: Second Run with all three options
+DetoxRun3: Third PreRun for Reinforcement Learning (10 epochs)
 
 
 =========  Others  =========

@@ -16,6 +16,7 @@ with open('metrics_log.txt', 'r') as file:
             losses.append(loss)
 
 # Plot the data
+
 plt.figure(figsize=(8, 5))
 plt.plot(steps, losses, marker='o', linestyle='-', color='blue', label='Loss')
 plt.yscale('log')  # Apply logarithmic scale to y-axis
