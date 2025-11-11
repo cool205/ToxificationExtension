@@ -65,10 +65,25 @@
     <div class="options-container">
       <div id="options">
         {% for option in options %}
-          <button type="button" class="option-button" onclick="selectOption(this, '{{ toxic_input }}', '{{ options }}', '{{ option }}')">
+          <button 
+            type="button" 
+            class="option-button" 
+            data-toxic="{{ toxic_input | e }}" 
+            data-options='{{ options | tojson }}' 
+            data-option="{{ option | e }}"
+            onclick="selectOption(this)">
             Option {{ loop.index }}: {{ option }}
           </button>
         {% endfor %}
+        <button 
+          type="button" 
+          class="option-button" 
+          data-toxic="{{ toxic_input | e }}" 
+          data-options='{{ options | tojson }}' 
+          data-option="UNTOXIFIABLE"
+          onclick="selectOption(this)">
+          🚫 This is untoxifiable
+        </button>
       </div>
       
       <input type="hidden" id="selectedOption" value="">
@@ -97,16 +112,13 @@
   <script>
     let selectedOption = null;
 
-    function selectOption(button, toxicInput, allOptions, option) {
+    function selectOption(button) {
       // Remove previous selection
       document.querySelectorAll('.option-button').forEach(btn => btn.classList.remove('selected'));
-      
-      // Mark this button as selected
       button.classList.add('selected');
-      selectedOption = option;
-      document.getElementById('selectedOption').value = option;
-      
-      console.log('Selected:', option);
+      selectedOption = button.getAttribute('data-option');
+      document.getElementById('selectedOption').value = selectedOption;
+      console.log('Selected:', selectedOption);
     }
 
     function submitChoice() {

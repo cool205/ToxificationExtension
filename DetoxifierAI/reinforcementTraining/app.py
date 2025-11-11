@@ -10,7 +10,7 @@ import sys
 app = Flask(__name__)
 
 # Load fine-tuned T5 model
-model_path = Path(__file__).parent / "t5-small-detox-finetuned"
+model_path = "DetoxifierAI/t5-small-detox-finetuned"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
 model.to("cuda" if torch.cuda.is_available() else "cpu")

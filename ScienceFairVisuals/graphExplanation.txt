@@ -18,7 +18,7 @@ Detox3Epoch: First Model trained with 3 Epochs
 Detox5Epoch: Model trained with 5 Epochs
 DetoxRun2: Second Run with all three options
 DetoxRun3: Third PreRun for Reinforcement Learning (10 epochs)
-
+ReinforcementLoop: The UI for my reinforcement training
 
 =========  Others  =========
 
