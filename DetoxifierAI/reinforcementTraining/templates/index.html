@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Detoxifier - DPO Learning</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .options-container {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    .option-button {
+      display: block;
+      width: 100%;
+      margin: 10px 0;
+      padding: 15px;
+      background-color: #f0f0f0;
+      border: 2px solid #ccc;
+      border-radius: 5px;
+      cursor: pointer;
+      text-align: left;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+    .option-button:hover {
+      background-color: #e0e0e0;
+      border-color: #999;
+    }
+    .option-button.selected {
+      background-color: #4CAF50;
+      color: white;
+      border-color: #45a049;
+    }
+    .submit-choice {
+      margin-top: 15px;
+    }
+    .retrain-section {
+      margin-top: 30px;
+      padding: 15px;
+      background-color: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    .stats {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #e8f5e9;
+      border-left: 3px solid #4CAF50;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧹 Detoxifier - Direct Preference Optimization</h1>
+  
+  <form method="POST">
+    <textarea name="message" placeholder="Enter a toxic message..." rows="4" cols="50" required></textarea><br>
+    <button type="submit">Generate Options</button>
+  </form>
+
+  {% if options %}
+    <h2>Choose the Best Detoxified Option:</h2>
+    <p>Your toxic input: <strong>{{ toxic_input }}</strong></p>
+    
+    <div class="options-container">
+      <div id="options">
+        {% for option in options %}
+          <button type="button" class="option-button" onclick="selectOption(this, '{{ toxic_input }}', '{{ options }}', '{{ option }}')">
+            Option {{ loop.index }}: {{ option }}
+          </button>
+        {% endfor %}
+      </div>
+      
+      <input type="hidden" id="selectedOption" value="">
+      <input type="hidden" id="allOptions" value='{{ options | tojson }}'>
+      <input type="hidden" id="toxicInput" value="{{ toxic_input }}">
+      
+      <div class="submit-choice">
+        <button type="button" onclick="submitChoice()" style="background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+          ✓ Submit Choice
+        </button>
+      </div>
+    </div>
+
+    <div class="stats" id="status"></div>
+  {% endif %}
+
+  <div class="retrain-section">
+    <h2>Model Retraining</h2>
+    <p>Once you've collected enough preferences, retrain the model using DPO.</p>
+    <button type="button" onclick="retrainModel()" style="background-color: #2196F3; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+      🔄 Retrain Model (DPO)
+    </button>
+    <div id="retrainStatus"></div>
+  </div>
+
+  <script>
+    let selectedOption = null;
+
+    function selectOption(button, toxicInput, allOptions, option) {
+      // Remove previous selection
+      document.querySelectorAll('.option-button').forEach(btn => btn.classList.remove('selected'));
+      
+      // Mark this button as selected
+      button.classList.add('selected');
+      selectedOption = option;
+      document.getElementById('selectedOption').value = option;
+      
+      console.log('Selected:', option);
+    }
+
+    function submitChoice() {
+      if (!selectedOption) {
+        alert('Please select an option first!');
+        return;
+      }
+
+      const toxicInput = document.getElementById('toxicInput').value;
+      const allOptions = JSON.parse(document.getElementById('allOptions').value);
+
+      const data = {
+        toxic: toxicInput,
+        chosen: selectedOption,
+        options: allOptions
+      };
+
+      fetch('/choose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+      .then(response => response.json())
+      .then(result => {
+        if (result.success) {
+          document.getElementById('status').innerHTML = `
+            <strong>✓ Preference saved!</strong><br>
+            Chosen: ${result.chosen}<br>
+            Rejected: ${result.rejected_count} options<br>
+            Message: ${result.message}
+          `;
+          // Reset selection
+          selectedOption = null;
+          setTimeout(() => location.reload(), 2000);
+        } else {
+          alert('Error: ' + result.error);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to save preference');
+      });
+    }
+
+    function retrainModel() {
+      if (!confirm('Start DPO retraining? This may take a while...')) {
+        return;
+      }
+
+      const retrainStatus = document.getElementById('retrainStatus');
+      retrainStatus.innerHTML = '<p>⏳ Retraining in progress...</p>';
+
+      fetch('/retrain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      .then(response => response.json())
+      .then(result => {
+        if (result.success) {
+          retrainStatus.innerHTML = `
+            <div style="background-color: #c8e6c9; padding: 10px; border-radius: 5px; margin-top: 10px;">
+              <strong>✓ Retraining Complete!</strong><br>
+              ${result.message}<br>
+              <small>${result.output}</small>
+            </div>
+          `;
+        } else {
+          retrainStatus.innerHTML = `
+            <div style="background-color: #ffcdd2; padding: 10px; border-radius: 5px; margin-top: 10px;">
+              <strong>✗ Retraining Failed</strong><br>
+              ${result.error}
+            </div>
+          `;
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        retrainStatus.innerHTML = '<p style="color: red;">Failed to start retraining</p>';
+      });
+    }
+  </script>
+</body>
+</html>
