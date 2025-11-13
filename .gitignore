@@ -15,12 +15,6 @@ __pycache__/
 datasets/
 cache/
 
-# Ignore large logs or outputs
-*.log
-*.csv
-*.jsonl
-*.npy
-*.npz
 
 # Ignore Jupyter notebook checkpoints
 .ipynb_checkpoints/
@@ -29,9 +23,3 @@ cache/
 *.tmp
 *.swp
 .DS_Store
-
-Detoxifier_Generation/paragedi-detox-finetuned/
-Detoxifier_Generation/t5-small-detox-finetuned/
-t5-small-detox-finetuned/
-detoxGenerationModel/
-ClassificationModel/

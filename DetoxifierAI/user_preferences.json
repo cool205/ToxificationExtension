@@ -87,5 +87,30 @@
     "rejected": [
       "detoxify: Nick is not good at brawl stars he can go commit sewer slide"
     ]
+  },
+  {
+    "toxic": "I work in a warehouse in scalding ass hot Alabama and it rules.",
+    "chosen": "detoxify: I work in a warehouse in Alabama and it rules",
+    "rejected": [
+      "detoxify: I work in a warehouse in Alabama and it rules.",
+      "I work in a warehouse in scalding Alabama and it rules."
+    ]
+  },
+  {
+    "toxic": "Epstein and trump were best buds!!! Pedophiles who play together!!",
+    "chosen": "UNTOXIFIABLE",
+    "rejected": [
+      "detoxify: Epstein and Trump were the best buds!! Pedophiles who play together!!",
+      "detoxify: Epstein and Trump were best buds!!! Pedophiles who play together!!",
+      "detoxify: Epstein and Trump were best buds!!! Pedophiles who play together!!"
+    ]
+  },
+  {
+    "toxic": "Really is hard to breathe in hell where your low life drug addicted criminal ass belongs",
+    "chosen": "detoxify: Really is hard to breathe in hell where you belongs",
+    "rejected": [
+      "detoxify: Really is hard to breathe in hell where you belong",
+      "detoxify: Really hard to breathe in hell where your low life drug addict criminal belongs"
+    ]
   }
 ]
