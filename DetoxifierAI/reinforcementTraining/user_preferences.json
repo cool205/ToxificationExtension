@@ -1,0 +1,20 @@
+[
+  {
+    "toxic": "I hate you",
+    "chosen": "UNTOXIFIABLE",
+    "rejected": [
+      "I hate you",
+      "detoxify: I hate you",
+      "I hate you"
+    ]
+  },
+  {
+    "toxic": "You are the most racist person in this entire world. Shut the fuck up",
+    "chosen": "UNTOXIFIABLE",
+    "rejected": [
+      "detoxify: You are the most racist person in this entire world.",
+      "detoxify: You are the most racist person in this whole world.",
+      "detoxify: You are the most racist person in this entire world."
+    ]
+  }
+]
