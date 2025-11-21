@@ -108,31 +108,29 @@ def choose_preference():
 def retrain_model():
     """Trigger DPO retraining with user preferences."""
     prefs_file = Path(__file__).parent / "user_preferences.json"
-    
+
     if not prefs_file.exists():
         return jsonify({"error": "No preferences saved yet"}), 400
-    
+
     try:
         with open(prefs_file, "r") as f:
             prefs = json.load(f)
-        
+
         if len(prefs) == 0:
             return jsonify({"error": "No preferences to train on"}), 400
-        
-        # Run after_train.py in background
-        after_train_path = Path(__file__).parent.parent / "after_train.py"
-        
-        # Use subprocess to run the training script
+
+        # Path to reinforceTrain.py
+        reinforce_path = Path(__file__).parent / "reinforceTrain.py"
+
         proc = subprocess.Popen(
-            [sys.executable, str(after_train_path)],
+            [sys.executable, str(reinforce_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        
-        # Wait for completion (you can also make this async for longer training)
+
         stdout, stderr = proc.communicate(timeout=3600)  # 1 hour timeout
-        
+
         if proc.returncode == 0:
             return jsonify({
                 "success": True,
@@ -140,18 +138,18 @@ def retrain_model():
                 "output": stdout
             })
         else:
+            print("STDERR:", stderr)
             return jsonify({
                 "error": "Retraining failed",
                 "stderr": stderr
             }), 500
-    
+
     except subprocess.TimeoutExpired:
         proc.kill()
-        return jsonify({
-            "error": "Retraining timeout (exceeded 1 hour)"
-        }), 500
+        return jsonify({"error": "Retraining timeout (exceeded 1 hour)"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(debug=False)

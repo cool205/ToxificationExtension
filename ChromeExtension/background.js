@@ -6,7 +6,7 @@ const connectedPorts = new Map();
 
 // Configuration
 const CONFIG = {
-  API_BASE: "https://TechKid0109-DetoxificationAI.hf.space",
+  API_BASE: "https://TechKid0109-Detox-Extension.hf.space",
   TOXIC_CONFIDENCE_THRESHOLD: 0.95,
   MAX_RETRIES: 4
 };

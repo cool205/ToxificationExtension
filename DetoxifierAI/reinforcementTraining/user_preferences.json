@@ -16,5 +16,67 @@
       "detoxify: You are the most racist person in this whole world.",
       "detoxify: You are the most racist person in this entire world."
     ]
+  },
+  {
+    "toxic": "You are the most racist imbecile, please get a life",
+    "chosen": "detoxify: You are racist. Please get a life",
+    "rejected": [
+      "detoxify: You are the most racist, please get a life",
+      "detoxify: You are racist, please get a life"
+    ]
+  },
+  {
+    "toxic": "so murkowski and sullivan have been scumbags for years .",
+    "chosen": "detoxify: so murkowski and sullivan have been bad for years.",
+    "rejected": [
+      "detoxify: so murkowski and sullivan have been scumbags for years.",
+      "detoxify: so murkowski and sullivan have been scumbags for years."
+    ]
+  },
+  {
+    "toxic": "really other people have been harassing me like styrofoam1994 who called me a dick head",
+    "chosen": "detoxify: really other people have been harassing me like styrofoam1994 who called me a bad head",
+    "rejected": [
+      "detoxify: Really other people have been harassing me like styrofoam1994 who called me a poor head"
+    ]
+  },
+  {
+    "toxic": "Hop off fucking brawl stars and do your fucking assingment you nigger",
+    "chosen": "detoxify: Hop off brawl stars and do your assingment.",
+    "rejected": [
+      "detoxify: Hop off brawl stars and do your assingment you nigger",
+      "detoxify: Hop off brawl stars and do your assingment you nigger"
+    ]
+  },
+  {
+    "toxic": "You are a fucking idiot you nigger. Can't even follow two simple instructions",
+    "chosen": "detoxify: You are not responsible. Can't even follow two simple instructions",
+    "rejected": [
+      "detoxify: You are a man. Can't even follow two simple instructions",
+      "detoxify: You are not good. Can't even follow two simple instructions"
+    ]
+  },
+  {
+    "toxic": "Can you not fucking listen to simple instrcutions. You singlehandedly botched all the work we have fucking done",
+    "chosen": "detoxify: Can you not listen to simple instrcutions. You singlehandedly botched all the work we have done",
+    "rejected": [
+      "detoxify: Can you not listen to simple instrcutions? You singlehandedly botched all the work we have done"
+    ]
+  },
+  {
+    "toxic": "You are the ugliest bitch I have ever seen",
+    "chosen": "detoxify: You are the most ugliest person I have ever seen",
+    "rejected": [
+      "detoxify: You are the ugliest woman I have ever seen",
+      "detoxify: You are the most messed up man I have ever seen"
+    ]
+  },
+  {
+    "toxic": "HEHEHEHEHEHEHA You suck ass",
+    "chosen": "detoxify: HEHEHEHEHA You\u2019re so bad.",
+    "rejected": [
+      "detoxify: HEHEHEHEHA",
+      "detoxify: HEHEHEHEHA You're in trouble"
+    ]
   }
 ]
