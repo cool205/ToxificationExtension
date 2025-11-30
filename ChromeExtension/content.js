@@ -105,7 +105,14 @@ function enqueue(nodes, text) {
 
   batchQueue.push({ id, nodes, text, parent });
 
-  if (!batchTimer) {
+  // If batch grew large, flush immediately to reduce latency, otherwise schedule
+  if (batchQueue.length >= MAX_BATCH_SIZE) {
+    if (batchTimer) {
+      clearTimeout(batchTimer);
+      batchTimer = null;
+    }
+    flushBatch();
+  } else if (!batchTimer) {
     batchTimer = setTimeout(flushBatch, BATCH_DELAY);
   }
 }
@@ -164,8 +171,16 @@ async function flushBatch() {
         span.dataset.detoxified = "1";
         span.dataset.textId = it.id;
 
+        // Insert span at the position of the first original node to preserve DOM flow
+        const firstNode = it.nodes && it.nodes[0];
+        if (firstNode && firstNode.parentNode) {
+          firstNode.parentNode.insertBefore(span, firstNode);
+        } else {
+          it.parent.appendChild(span);
+        }
+
+        // Remove all original nodes after inserting the replacement
         it.nodes.forEach((n) => n.remove());
-        it.parent.appendChild(span);
 
         it.parent.dataset.detoxified = "1";
         it.parent.dataset.textId = it.id;

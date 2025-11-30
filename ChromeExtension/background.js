@@ -228,11 +228,25 @@ async function detoxifyTextBatch(texts) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "logDetox":
-      pushWithCap(detoxLog, msg.payload);
+      {
+        const entry = Object.assign({}, msg.payload || {});
+        if (sender && sender.tab) {
+          entry.tabId = sender.tab.id;
+          entry.pageUrl = sender.tab.url;
+        }
+        pushWithCap(detoxLog, entry);
+      }
       break;
 
     case "logDetected":
-      pushWithCap(detectedLog, msg.payload);
+      {
+        const entry = Object.assign({}, msg.payload || {});
+        if (sender && sender.tab) {
+          entry.tabId = sender.tab.id;
+          entry.pageUrl = sender.tab.url;
+        }
+        pushWithCap(detectedLog, entry);
+      }
       break;
 
     case "getDetoxLog":
@@ -242,13 +256,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           original: e.original,
           detoxified: e.detoxified,
           attempts: e.attempts,
-          error: e.error
+          error: e.error,
+          tabId: e.tabId ?? null,
+          pageUrl: e.pageUrl ?? null
         })),
         allScanned: detectedLog.map(e => ({
           id: e.id ?? null,
           text: e.text,
           isToxic: e.isToxic,
-          timestamp: e.timestamp ?? null
+          timestamp: e.timestamp ?? null,
+          tabId: e.tabId ?? null,
+          pageUrl: e.pageUrl ?? null
         }))
       });
       break;

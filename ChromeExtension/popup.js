@@ -63,7 +63,23 @@ async function loadAndRender() {
   if (!res) return;
 
   const pairs = res.pairs || [];
-  const scanned = res.allScanned || [];
+  let scanned = res.allScanned || [];
+
+  // Get active tab id to filter logs for the current page
+  const activeTab = await new Promise((resolve) => {
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        resolve((tabs && tabs[0]) || null);
+      });
+    } catch (e) {
+      resolve(null);
+    }
+  });
+  const activeTabId = activeTab ? activeTab.id : null;
+
+  if (activeTabId != null) {
+    scanned = scanned.filter((s) => (s.tabId == null ? false : s.tabId === activeTabId));
+  }
 
   // Map detox outputs by id and by original text for fallback
   const detoxById = new Map();
@@ -129,11 +145,31 @@ async function loadAndRender() {
   }
 }
 
+// Refresh popup when the active tab changes or finishes loading
+try {
+  chrome.tabs.onActivated.addListener(() => {
+    loadAndRender();
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo && changeInfo.status === 'complete') loadAndRender();
+  });
+} catch (e) {
+  // ignore if tabs permission not present
+}
+
 async function applyHighlightsToPage() {
   const res = await sendToBackground({ type: 'getDetoxLog' });
   if (!res) return;
   const pairs = res.pairs || [];
-  const scanned = res.allScanned || [];
+  let scanned = res.allScanned || [];
+
+  // filter to active tab
+  const activeTab = await new Promise((resolve) => {
+    try { chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve((tabs && tabs[0]) || null)); }
+    catch (e) { resolve(null); }
+  });
+  const activeTabId = activeTab ? activeTab.id : null;
+  if (activeTabId != null) scanned = scanned.filter(s => s.tabId === activeTabId);
 
   const detoxById = new Map();
   const detoxByText = new Map();
@@ -161,7 +197,13 @@ async function applyHighlightsToPage() {
 async function clearHighlightsOnPage() {
   const res = await sendToBackground({ type: 'getDetoxLog' });
   if (!res) return;
-  const scanned = res.allScanned || [];
+  let scanned = res.allScanned || [];
+  const activeTab = await new Promise((resolve) => {
+    try { chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve((tabs && tabs[0]) || null)); }
+    catch (e) { resolve(null); }
+  });
+  const activeTabId = activeTab ? activeTab.id : null;
+  if (activeTabId != null) scanned = scanned.filter(s => s.tabId === activeTabId);
   for (const item of scanned) {
     const id = item.id != null ? String(item.id) : null;
     if (!id) continue;
