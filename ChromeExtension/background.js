@@ -6,7 +6,8 @@ const CONFIG = {
   API_BASE: "https://TechKid0109-Detox-Extension.hf.space",
   TOXIC_CONFIDENCE_THRESHOLD: 98,
   MAX_RETRIES: 4,
-  LOG_CAP: 500
+  LOG_CAP: 500,
+  DETOX_CONCURRENCY: 4
 };
 
 // In-memory caches to reduce duplicate API calls for identical texts
@@ -16,6 +17,46 @@ const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 
 // Delay helper
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// storage helpers
+function storageGet(keys) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(keys, (res) => resolve(res || {}));
+    } catch (e) {
+      resolve({});
+    }
+  });
+}
+
+function storageSet(obj) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set(obj, () => resolve());
+    } catch (e) {
+      resolve();
+    }
+  });
+}
+
+// Warm up caches from storage at startup
+(async function warmupCaches() {
+  try {
+    const stored = await storageGet(['classificationCache', 'detoxCache']);
+    if (stored.classificationCache) {
+      Object.entries(stored.classificationCache).forEach(([k, v]) => {
+        try { classificationCache.set(k, v); } catch (e) {}
+      });
+    }
+    if (stored.detoxCache) {
+      Object.entries(stored.detoxCache).forEach(([k, v]) => {
+        try { detoxCache.set(k, v); } catch (e) {}
+      });
+    }
+  } catch (e) {
+    /* ignore */
+  }
+})();
 
 // Push with cap
 function pushWithCap(log, entry, cap = CONFIG.LOG_CAP) {
@@ -92,7 +133,14 @@ async function classifyText(text) {
       attempts: res.attempts
     };
 
-    try { classificationCache.set(key, { ts: Date.now(), result }); } catch (e) {}
+    try {
+      classificationCache.set(key, { ts: Date.now(), result });
+      // persist whole cache (simple approach)
+      const serialized = {};
+      classificationCache.forEach((v, k) => { serialized[k] = v; });
+      storageSet({ classificationCache: serialized });
+    } catch (e) {}
+
     return result;
   } catch (err) {
     console.error("Classification error:", err);
@@ -111,7 +159,12 @@ async function detoxifyTextSingle(text) {
   const classification = await classifyText(text);
   if (!(classification.success && classification.isToxic)) {
     // cache that detox is not needed
-    try { detoxCache.set(key, { ts: Date.now(), output: text }); } catch (e) {}
+    try {
+      detoxCache.set(key, { ts: Date.now(), output: text });
+      const serialized = {};
+      detoxCache.forEach((v, k) => { serialized[k] = v; });
+      storageSet({ detoxCache: serialized });
+    } catch (e) {}
     return {
       output: text,
       attempts: classification.attempts,
@@ -135,18 +188,40 @@ async function detoxifyTextSingle(text) {
     (Array.isArray(json.data) ? json.data[0] : Array.isArray(json.output) ? json.output[0] : text) ||
     text;
 
-  try { detoxCache.set(key, { ts: Date.now(), output }); } catch (e) {}
+  try { detoxCache.set(key, { ts: Date.now(), output });
+    const serialized = {};
+    detoxCache.forEach((v, k) => { serialized[k] = v; });
+    storageSet({ detoxCache: serialized });
+  } catch (e) {}
   return { output, attempts: r.attempts, error: null };
 }
 
 async function detoxifyTextBatch(texts) {
-  const results = [];
-  for (const t of texts) {
-    const capped = typeof t === "string" && t.length > 5000 ? t.slice(0, 5000) : t;
-    const res = await detoxifyTextSingle(capped);
-    results.push(res);
-    await wait(50 + Math.floor(Math.random() * 50));
-  }
+  // Run detox operations with limited concurrency to speed up throughput
+  const tasks = texts.map((t) => {
+    return async () => {
+      const capped = typeof t === "string" && t.length > 5000 ? t.slice(0, 5000) : t;
+      return detoxifyTextSingle(capped);
+    };
+  });
+
+  const concurrency = CONFIG.DETOX_CONCURRENCY || 4;
+  const results = new Array(tasks.length);
+  let idx = 0;
+
+  const workers = new Array(concurrency).fill(0).map(async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= tasks.length) break;
+      try {
+        results[i] = await tasks[i]();
+      } catch (e) {
+        results[i] = { output: texts[i], attempts: 0, error: String(e) };
+      }
+    }
+  });
+
+  await Promise.all(workers);
   return results;
 }
 
@@ -192,6 +267,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
           if (Array.isArray(msg.texts)) {
+            // classify in parallel; classifyText uses cache so repeated texts are fast
             const results = await Promise.all(msg.texts.map(classifyText));
             sendResponse({
               success: true,

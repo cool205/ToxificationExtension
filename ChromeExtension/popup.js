@@ -76,19 +76,25 @@ async function loadAndRender() {
   totalCount.textContent = scanned.length;
   scannedList.innerHTML = '';
 
-  for (const item of scanned) {
+  // Build items with computed statuses, then sort: Red, Green, Yellow, Brown
+  const itemsWithStatus = scanned.map((item) => {
     const id = item.id != null ? String(item.id) : null;
     const text = item.text || '';
-
     let status = 'yellow';
     if (item.isToxic === null || item.isToxic === undefined) status = 'yellow';
     else if (item.isToxic === false) status = 'green';
     else if (item.isToxic === true) {
-      // see if detox exists
       const d = id ? detoxById.get(id) : detoxByText.get(String(text));
       status = d ? 'red' : 'brown';
     }
+    return { item, id, text, status };
+  });
 
+  const order = { red: 0, green: 1, yellow: 2, brown: 3 };
+  itemsWithStatus.sort((a, b) => (order[a.status] - order[b.status]));
+
+  for (const entry of itemsWithStatus) {
+    const { item, id, text, status } = entry;
     const div = document.createElement('div');
     div.className = 'scan-item';
     div.dataset.id = id;
@@ -109,7 +115,6 @@ async function loadAndRender() {
     div.appendChild(main);
     div.appendChild(meta);
 
-    // click to emphasize on page
     div.addEventListener('click', () => {
       if (!id) return;
       sendMessageToTab({ type: 'applyColor', id: id, status });

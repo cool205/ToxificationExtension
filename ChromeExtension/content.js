@@ -68,6 +68,7 @@ let processedHashes = new Set();
 let requestIdCounter = 1;
 
 const BATCH_DELAY = 100; // fast batching
+const MAX_BATCH_SIZE = 8; // flush immediately when this many items queued
 
 function hashString(s) {
   let h = 2166136261 >>> 0;
@@ -133,7 +134,7 @@ async function flushBatch() {
       }
     });
 
-    // Non-toxic: mark as processed (do not apply visual styles here)
+    // Non-toxic: mark as processed
     cleanItems.forEach((it) => {
       it.parent.dataset.detoxified = "1";
       it.parent.dataset.textId = it.id;
@@ -150,55 +151,59 @@ async function flushBatch() {
       });
     });
 
-    if (toxicItems.length === 0) return;
+    if (toxicItems.length > 0) {
+      const toxTexts = toxicItems.map((i) => i.text);
+      const { outputs = [], attempts = [], errors = [] } = await detoxifyTexts(toxTexts);
 
-    // Detoxify toxic items
-    const toxTexts = toxicItems.map((i) => i.text);
-    const { outputs = [], attempts = [], errors = [] } = await detoxifyTexts(toxTexts);
+      toxicItems.forEach((it, index) => {
+        let out = outputs[index] || it.text;
+        out = String(out).replace(/^\s*detoxify:\s*/i, "");
 
-    toxicItems.forEach((it, index) => {
-      let out = outputs[index] || it.text;
-      // remove model prefixes like "detoxify: " if present
-      out = String(out).replace(/^\s*detoxify:\s*/i, '');
+        const span = document.createElement("span");
+        span.textContent = out;
+        span.dataset.detoxified = "1";
+        span.dataset.textId = it.id;
 
-      const span = document.createElement("span");
-      span.textContent = out;
-      // mark generated content as detoxified so scanner ignores it
-      span.dataset.detoxified = "1";
-      span.dataset.textId = it.id;
+        it.nodes.forEach((n) => n.remove());
+        it.parent.appendChild(span);
 
-      it.nodes.forEach((n) => n.remove());
-      it.parent.appendChild(span);
+        it.parent.dataset.detoxified = "1";
+        it.parent.dataset.textId = it.id;
+        textElements.set(String(it.id), it.parent);
 
-      it.parent.dataset.detoxified = "1";
-      it.parent.dataset.textId = it.id;
-      textElements.set(String(it.id), it.parent);
+        sendBg({
+          type: "logDetox",
+          payload: {
+            id: it.id,
+            original: it.text,
+            detoxified: out,
+            attempts: attempts[index] || 0,
+            error: errors[index] || null,
+            timestamp: new Date().toISOString(),
+          },
+        });
 
-      sendBg({
-        type: "logDetox",
-        payload: {
-          id: it.id,
-          original: it.text,
-          detoxified: out,
-          attempts: attempts[index] || 0,
-          error: errors[index] || null,
-          timestamp: new Date().toISOString(),
-        },
+        sendBg({
+          type: "logDetected",
+          payload: {
+            id: it.id,
+            text: it.text,
+            isToxic: true,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        totalDetoxified++;
+        updateDetoxBadge(totalDetoxified);
       });
+    }
 
-      sendBg({
-        type: "logDetected",
-        payload: {
-          id: it.id,
-          text: it.text,
-          isToxic: true,
-          timestamp: new Date().toISOString(),
-        },
-      });
-
-      totalDetoxified++;
-      updateDetoxBadge(totalDetoxified);
-    });
+    // If more items queued, schedule next flush
+    if (batchQueue.length >= MAX_BATCH_SIZE) {
+      setTimeout(flushBatch, 0); // async re-entry
+    } else if (batchQueue.length > 0 && !batchTimer) {
+      batchTimer = setTimeout(flushBatch, BATCH_DELAY);
+    }
   } catch (err) {
     console.error("Batch failed:", err);
   }
@@ -218,22 +223,19 @@ const isVisible = (el) => {
 function scan(root = document.body) {
   createDetoxBadge();
 
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => {
-        const t = node.textContent.trim();
-        if (!t) return NodeFilter.FILTER_REJECT;
-        const p = node.parentElement;
-        if (!p || !isVisible(p)) return NodeFilter.FILTER_REJECT;
-        // skip content already marked as detoxified (prevent re-scanning/re-processing)
-        try {
-          if (p.closest && p.closest('[data-detoxified="1"]')) return NodeFilter.FILTER_REJECT;
-        } catch (e) {
-          /* ignore selector errors */
-        }
-        if (t.length < 10 || t.length > 1000) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      const t = node.textContent.trim();
+      if (!t) return NodeFilter.FILTER_REJECT;
+      const p = node.parentElement;
+      if (!p || !isVisible(p)) return NodeFilter.FILTER_REJECT;
+      try {
+        if (p.closest && p.closest('[data-detoxified="1"]')) return NodeFilter.FILTER_REJECT;
+      } catch (e) {}
+      if (t.length < 10 || t.length > 1000) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
 
   let textNodes = [];
   let lastParent = null;
@@ -300,7 +302,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#fff8e1";
           break;
-                case "red":
+        case "red":
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#ffecec";
           break;
