@@ -64,12 +64,12 @@ async function classifyText(text) {
     }
 
     // API returns { classification: "LABEL_0" or "LABEL_1", confidence: { LABEL_0: ..., LABEL_1: ... } }
-    // LABEL_1 = toxic, LABEL_0 = clean
-    const toxicConfidence = res.json?.confidence?.LABEL_1 || 0;
+    // LABEL_0 = NOT toxic (clean), LABEL_1 = toxic
+    const label1Confidence = res.json?.confidence?.LABEL_1 || 0;
     return {
       success: true,
-      isToxic: toxicConfidence >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD,
-      confidence: toxicConfidence,
+      isToxic: label1Confidence >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD,
+      confidence: label1Confidence,
       attempts: res.attempts
     };
   } catch (err) {
@@ -113,7 +113,7 @@ async function detoxifyTextBatch(texts) {
     const capped = typeof t === "string" && t.length > 5000 ? t.slice(0, 5000) : t;
     const res = await detoxifyTextSingle(capped);
     results.push(res);
-    await wait(150 + Math.floor(Math.random() * 100)); // jitter delay
+    await wait(50 + Math.floor(Math.random() * 50)); // faster jitter delay
   }
   return results;
 }

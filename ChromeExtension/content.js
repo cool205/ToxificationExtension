@@ -70,7 +70,7 @@ let textElements = new Map();
 let processedHashes = new Set();
 let requestIdCounter = 1;
 
-const BATCH_DELAY = 350; // real batching now
+const BATCH_DELAY = 100; // fast batching
 
 function hashString(s) {
   let h = 2166136261 >>> 0;
