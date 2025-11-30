@@ -63,7 +63,9 @@ async function classifyText(text) {
       return { success: false, error: res.error, attempts: res.attempts };
     }
 
-    const toxicConfidence = res.json?.confidence?.toxic || 0;
+    // API returns { classification: "LABEL_0" or "LABEL_1", confidence: { LABEL_0: ..., LABEL_1: ... } }
+    // LABEL_1 = toxic, LABEL_0 = clean
+    const toxicConfidence = res.json?.confidence?.LABEL_1 || 0;
     return {
       success: true,
       isToxic: toxicConfidence >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD,

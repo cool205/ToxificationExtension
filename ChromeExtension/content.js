@@ -172,7 +172,6 @@ async function flushBatch() {
       // Replace original text nodes
       const span = document.createElement("span");
       span.textContent = out;
-      span.style.backgroundColor = "#ffecec";
 
       it.nodes.forEach((n) => n.remove());
       it.parent.appendChild(span);
