@@ -9,6 +9,11 @@ const CONFIG = {
   LOG_CAP: 500
 };
 
+// In-memory caches to reduce duplicate API calls for identical texts
+const classificationCache = new Map(); // key -> { ts, result }
+const detoxCache = new Map(); // key -> { ts, output }
+const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+
 // Delay helper
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -52,6 +57,13 @@ async function fetchWithRetry(url, options, maxAttempts = CONFIG.MAX_RETRIES) {
 
 async function classifyText(text) {
   try {
+    const key = String(text).slice(0, 5000);
+    const now = Date.now();
+    const cached = classificationCache.get(key);
+    if (cached && now - cached.ts < CACHE_TTL_MS) {
+      return Object.assign({}, cached.result, { cached: true });
+    }
+
     const res = await fetchWithRetry(`${CONFIG.API_BASE}/classify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -72,13 +84,16 @@ async function classifyText(text) {
       data.classification === "LABEL_1" &&
       label1Confidence * 100 >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD;
 
-    return {
+    const result = {
       success: true,
       classification: data.classification,
       isToxic,
       confidence: { label0: label0Confidence, label1: label1Confidence },
       attempts: res.attempts
     };
+
+    try { classificationCache.set(key, { ts: Date.now(), result }); } catch (e) {}
+    return result;
   } catch (err) {
     console.error("Classification error:", err);
     return { success: false, error: String(err), attempts: 0 };
@@ -86,8 +101,17 @@ async function classifyText(text) {
 }
 
 async function detoxifyTextSingle(text) {
+  const key = String(text).slice(0, 5000);
+  const now = Date.now();
+  const cached = detoxCache.get(key);
+  if (cached && now - cached.ts < CACHE_TTL_MS) {
+    return { output: cached.output, attempts: 0, error: null, cached: true };
+  }
+
   const classification = await classifyText(text);
   if (!(classification.success && classification.isToxic)) {
+    // cache that detox is not needed
+    try { detoxCache.set(key, { ts: Date.now(), output: text }); } catch (e) {}
     return {
       output: text,
       attempts: classification.attempts,
@@ -111,6 +135,7 @@ async function detoxifyTextSingle(text) {
     (Array.isArray(json.data) ? json.data[0] : Array.isArray(json.output) ? json.output[0] : text) ||
     text;
 
+  try { detoxCache.set(key, { ts: Date.now(), output }); } catch (e) {}
   return { output, attempts: r.attempts, error: null };
 }
 

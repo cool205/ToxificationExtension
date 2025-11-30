@@ -133,9 +133,8 @@ async function flushBatch() {
       }
     });
 
-    // Non-toxic: mark green
+    // Non-toxic: mark as processed (do not apply visual styles here)
     cleanItems.forEach((it) => {
-      it.parent.style.backgroundColor = "#e6ffed";
       it.parent.dataset.detoxified = "1";
       it.parent.dataset.textId = it.id;
       textElements.set(String(it.id), it.parent);
@@ -143,6 +142,7 @@ async function flushBatch() {
       sendBg({
         type: "logDetected",
         payload: {
+          id: it.id,
           text: it.text,
           isToxic: false,
           timestamp: new Date().toISOString(),
@@ -157,9 +157,15 @@ async function flushBatch() {
     const { outputs = [], attempts = [], errors = [] } = await detoxifyTexts(toxTexts);
 
     toxicItems.forEach((it, index) => {
-      const out = outputs[index] || it.text;
+      let out = outputs[index] || it.text;
+      // remove model prefixes like "detoxify: " if present
+      out = String(out).replace(/^\s*detoxify:\s*/i, '');
+
       const span = document.createElement("span");
       span.textContent = out;
+      // mark generated content as detoxified so scanner ignores it
+      span.dataset.detoxified = "1";
+      span.dataset.textId = it.id;
 
       it.nodes.forEach((n) => n.remove());
       it.parent.appendChild(span);
@@ -183,6 +189,7 @@ async function flushBatch() {
       sendBg({
         type: "logDetected",
         payload: {
+          id: it.id,
           text: it.text,
           isToxic: true,
           timestamp: new Date().toISOString(),
@@ -211,16 +218,22 @@ const isVisible = (el) => {
 function scan(root = document.body) {
   createDetoxBadge();
 
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => {
-      const t = node.textContent.trim();
-      if (!t) return NodeFilter.FILTER_REJECT;
-      const p = node.parentElement;
-      if (!p || !isVisible(p)) return NodeFilter.FILTER_REJECT;
-      if (t.length < 10 || t.length > 1000) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const t = node.textContent.trim();
+        if (!t) return NodeFilter.FILTER_REJECT;
+        const p = node.parentElement;
+        if (!p || !isVisible(p)) return NodeFilter.FILTER_REJECT;
+        // skip content already marked as detoxified (prevent re-scanning/re-processing)
+        try {
+          if (p.closest && p.closest('[data-detoxified="1"]')) return NodeFilter.FILTER_REJECT;
+        } catch (e) {
+          /* ignore selector errors */
+        }
+        if (t.length < 10 || t.length > 1000) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
 
   let textNodes = [];
   let lastParent = null;
