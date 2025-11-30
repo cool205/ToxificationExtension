@@ -1,14 +1,15 @@
-// --- UI Elements ---
-const changedCount = document.getElementById('changedCount');
+// UI Elements
+const totalCount = document.getElementById('totalCount');
 const rescanBtn = document.getElementById('rescan');
 const scanStatus = document.getElementById('scanStatus');
-const changedList = document.getElementById('detox-changed-list');
+const scannedList = document.getElementById('scanned-list');
+const highlightCheckbox = document.getElementById('highlightOnPage');
 
 let scanInterval = 1000; // ms
 let scanTimer = null;
 let nextScanTime = null;
 
-// --- Messaging helpers ---
+// Messaging helpers
 function sendMessageToTab(msg) {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -31,70 +32,13 @@ function sendToBackground(msg) {
   });
 }
 
-// --- UI rendering ---
-function renderDetoxTable(pairs) {
-  detoxTableBody.innerHTML = '';
-  if (!pairs || !pairs.length) {
-    changedCount.textContent = '0';
-    return;
-  }
-  changedCount.textContent = pairs.length;
-  for (const p of pairs) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="background:#ffecec;">${escapeHtml(p.original)}</td>
-      <td style="background:#e6ffed;">${escapeHtml(p.detoxified)}${p.attempts ? ` <span style='color:#888;font-size:11px;'>(Attempts: ${p.attempts}${p.error ? ', Error: ' + escapeHtml(p.error) : ''})</span>` : ''}</td>
-    `;
-    detoxTableBody.appendChild(tr);
-  }
-}
-
-
-function renderResultsPanel(pairs) {
-  changedList.innerHTML = '';
-  changedCount.textContent = pairs?.length || 0;
-  
-  if (pairs && pairs.length) {
-    for (const p of pairs) {
-      const div = document.createElement('div');
-      div.style.background = '#fff0f0';
-      div.style.padding = '12px';
-      div.style.borderRadius = '4px';
-      div.style.wordBreak = 'break-word';
-      div.style.marginBottom = '8px';
-      
-      const before = document.createElement('div');
-      before.style.color = '#b30000';
-      before.textContent = p.original;
-      
-      const after = document.createElement('div');
-      after.style.marginTop = '8px';
-      after.style.color = '#006400';
-      after.textContent = p.detoxified;
-      
-      if (p.attempts) {
-        const info = document.createElement('div');
-        info.style.marginTop = '4px';
-        info.style.fontSize = '11px';
-        info.style.color = '#666';
-        info.textContent = `Attempts: ${p.attempts}${p.error ? ' | Error: ' + p.error : ''}`;
-        after.appendChild(info);
-      }
-      
-      div.appendChild(before);
-      div.appendChild(after);
-      changedList.appendChild(div);
-    }
-  }
-}
-
 function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, function (c) {
+  return String(str || '').replace(/[&<>"']/g, function (c) {
     return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
   });
 }
 
-// --- Scan timer ---
+// Scan timer helpers
 function updateScanStatus() {
   if (nextScanTime) {
     const ms = Math.max(0, nextScanTime - Date.now());
@@ -113,12 +57,111 @@ function scheduleNextScan() {
   }, scanInterval);
 }
 
-// --- Main logic ---
+// Render UI
 async function loadAndRender() {
-  // Get toxic/detox pairs from background
   const res = await sendToBackground({ type: 'getDetoxLog' });
   if (!res) return;
-  renderResultsPanel(res.pairs || []);
+
+  const pairs = res.pairs || [];
+  const scanned = res.allScanned || [];
+
+  // Map detox outputs by id and by original text for fallback
+  const detoxById = new Map();
+  const detoxByText = new Map();
+  for (const p of pairs) {
+    if (p.id != null) detoxById.set(String(p.id), p);
+    if (p.original) detoxByText.set(String(p.original), p);
+  }
+
+  totalCount.textContent = scanned.length;
+  scannedList.innerHTML = '';
+
+  for (const item of scanned) {
+    const id = item.id != null ? String(item.id) : null;
+    const text = item.text || '';
+
+    let status = 'yellow';
+    if (item.isToxic === null || item.isToxic === undefined) status = 'yellow';
+    else if (item.isToxic === false) status = 'green';
+    else if (item.isToxic === true) {
+      // see if detox exists
+      const d = id ? detoxById.get(id) : detoxByText.get(String(text));
+      status = d ? 'red' : 'brown';
+    }
+
+    const div = document.createElement('div');
+    div.className = 'scan-item';
+    div.dataset.id = id;
+
+    const badge = document.createElement('span');
+    badge.className = `status-badge status-${status}`;
+    badge.textContent = status.toUpperCase();
+
+    const main = document.createElement('div');
+    main.innerHTML = escapeHtml(text);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const ts = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
+    meta.textContent = ts + (id ? ` | id: ${id}` : '');
+
+    div.appendChild(badge);
+    div.appendChild(main);
+    div.appendChild(meta);
+
+    // click to emphasize on page
+    div.addEventListener('click', () => {
+      if (!id) return;
+      sendMessageToTab({ type: 'applyColor', id: id, status });
+    });
+
+    scannedList.appendChild(div);
+  }
+
+  // apply highlights if toggle is on
+  if (highlightCheckbox.checked) {
+    applyHighlightsToPage();
+  }
+}
+
+async function applyHighlightsToPage() {
+  const res = await sendToBackground({ type: 'getDetoxLog' });
+  if (!res) return;
+  const pairs = res.pairs || [];
+  const scanned = res.allScanned || [];
+
+  const detoxById = new Map();
+  const detoxByText = new Map();
+  for (const p of pairs) {
+    if (p.id != null) detoxById.set(String(p.id), p);
+    if (p.original) detoxByText.set(String(p.original), p);
+  }
+
+  for (const item of scanned) {
+    const id = item.id != null ? String(item.id) : null;
+    if (!id) continue;
+
+    let status = 'yellow';
+    if (item.isToxic === null || item.isToxic === undefined) status = 'yellow';
+    else if (item.isToxic === false) status = 'green';
+    else if (item.isToxic === true) {
+      const d = detoxById.get(id) || detoxByText.get(String(item.text));
+      status = d ? 'red' : 'brown';
+    }
+
+    await sendMessageToTab({ type: 'applyColor', id, status });
+  }
+}
+
+async function clearHighlightsOnPage() {
+  const res = await sendToBackground({ type: 'getDetoxLog' });
+  if (!res) return;
+  const scanned = res.allScanned || [];
+  for (const item of scanned) {
+    const id = item.id != null ? String(item.id) : null;
+    if (!id) continue;
+    await sendMessageToTab({ type: 'removeColor', id });
+  }
 }
 
 async function triggerRescan() {
@@ -130,6 +173,11 @@ async function triggerRescan() {
 
 rescanBtn.addEventListener('click', () => {
   triggerRescan();
+});
+
+highlightCheckbox.addEventListener('change', () => {
+  if (highlightCheckbox.checked) applyHighlightsToPage();
+  else clearHighlightsOnPage();
 });
 
 // Initial load

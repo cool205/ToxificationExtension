@@ -132,14 +132,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "getDetoxLog":
       sendResponse({
         pairs: detoxLog.map(e => ({
+          id: e.id ?? null,
           original: e.original,
           detoxified: e.detoxified,
           attempts: e.attempts,
           error: e.error
         })),
         allScanned: detectedLog.map(e => ({
+          id: e.id ?? null,
           text: e.text,
-          isToxic: e.isToxic
+          isToxic: e.isToxic,
+          timestamp: e.timestamp ?? null
         }))
       });
       break;

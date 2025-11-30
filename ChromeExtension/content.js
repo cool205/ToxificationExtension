@@ -90,8 +90,25 @@ function enqueue(nodes, text) {
   if (processedHashes.has(h)) return;
   processedHashes.add(h);
 
+  const id = requestIdCounter++;
+
+  // mark the parent early so popup/content can reference it while pending
+  parent.dataset.textId = id;
+  textElements.set(String(id), parent);
+
+  // log detected as pending (isToxic: null)
+  sendBg({
+    type: "logDetected",
+    payload: {
+      id,
+      text,
+      isToxic: null,
+      timestamp: new Date().toISOString(),
+    },
+  });
+
   batchQueue.push({
-    id: requestIdCounter++,
+    id,
     nodes,
     text,
     parent,
@@ -272,6 +289,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "triggerRescan") {
     scan();
     sendResponse({ success: true });
+  }
+  
+  if (msg.type === 'applyColor') {
+    // msg.status: 'green' | 'yellow' | 'red' | 'brown'
+    const el = textElements.get(String(msg.id));
+    if (el) {
+      // set a gentle background to indicate status
+      switch (msg.status) {
+        case 'green':
+          el.style.transition = 'background-color 0.2s ease';
+          el.style.backgroundColor = '#e6ffed';
+          break;
+        case 'yellow':
+          el.style.transition = 'background-color 0.2s ease';
+          el.style.backgroundColor = '#fff8e1';
+          break;
+        case 'red':
+          el.style.transition = 'background-color 0.2s ease';
+          el.style.backgroundColor = '#ffecec';
+          break;
+        case 'brown':
+          el.style.transition = 'background-color 0.2s ease';
+          el.style.backgroundColor = '#f3e6d6';
+          break;
+      }
+    }
+  }
+
+  if (msg.type === 'removeColor') {
+    const el = textElements.get(String(msg.id));
+    if (el) {
+      el.style.backgroundColor = '';
+    }
   }
 });
 
