@@ -4,7 +4,7 @@ const connectedPorts = new Map();
 
 const CONFIG = {
   API_BASE: "https://TechKid0109-Detox-Extension.hf.space",
-  TOXIC_CONFIDENCE_THRESHOLD: 90, // 90% threshold
+  TOXIC_CONFIDENCE_THRESHOLD: 98,
   MAX_RETRIES: 4,
   LOG_CAP: 500
 };
