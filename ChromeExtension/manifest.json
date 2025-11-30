@@ -1,8 +1,8 @@
 {
-  "name": "Toxicity Changer Extension",
+  "name": "Detoxifyr",
   "version": "1.0",
   "manifest_version": 3,
-  "description": "A Chrome extension to change the toxicity level of text on web pages.",
+  "description": "Detoxifyr - Automatically cleanse the web of toxic language using AI-powered text detoxification.",
   "permissions": [
     "scripting",
     "storage",
