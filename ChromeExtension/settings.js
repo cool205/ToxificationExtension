@@ -23,6 +23,7 @@
     logCapVal: document.getElementById('logCapVal'),
     saveBtn: document.getElementById('saveBtn'),
     resetBtn: document.getElementById('resetBtn'),
+    clearCacheBtn: document.getElementById('clearCacheBtn'),
     status: document.getElementById('status')
   };
 
@@ -85,10 +86,28 @@
   });
 
   els.resetBtn.addEventListener('click', async () => {
-    await save(defaults);
-    setValuesFrom(defaults);
-    els.status.textContent = 'Defaults restored.';
-    setTimeout(()=> els.status.textContent = '', 2000);
+    const ok = confirm('Reset settings to defaults?');
+    if (!ok) return;
+    // Ask background to reset settings and clear persisted caches
+    chrome.runtime.sendMessage({ type: 'resetSettings' }, (resp) => {
+      // update UI regardless
+      setValuesFrom(defaults);
+      els.status.textContent = resp && resp.success ? 'Defaults restored.' : 'Reset attempted.';
+      setTimeout(()=> els.status.textContent = '', 2000);
+    });
+  });
+
+  els.clearCacheBtn.addEventListener('click', async () => {
+    const ok = confirm('Clear classification and detox caches? This cannot be undone.');
+    if (!ok) return;
+    chrome.runtime.sendMessage({ type: 'clearCaches' }, (resp) => {
+      if (resp && resp.success) {
+        els.status.textContent = 'Caches cleared.';
+      } else {
+        els.status.textContent = 'Clear cache failed.';
+      }
+      setTimeout(()=> els.status.textContent = '', 2000);
+    });
   });
 
   // initialize UI

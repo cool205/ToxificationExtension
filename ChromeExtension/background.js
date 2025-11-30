@@ -7,13 +7,53 @@ const CONFIG = {
   TOXIC_CONFIDENCE_THRESHOLD: 98,
   MAX_RETRIES: 4,
   LOG_CAP: 500,
-  DETOX_CONCURRENCY: 4
+  DETOX_CONCURRENCY: 4,
+  CACHE_WRITE_INTERVAL_MS: 5000
 };
 
 // In-memory caches to reduce duplicate API calls for identical texts
 const classificationCache = new Map(); // key -> { ts, result }
 const detoxCache = new Map(); // key -> { ts, output }
 let CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour (mutable)
+// Throttled persistence state for caches
+let cachesDirty = { classification: false, detox: false };
+let cacheFlushTimer = null;
+
+function scheduleCachePersist() {
+  if (cacheFlushTimer) clearTimeout(cacheFlushTimer);
+  cacheFlushTimer = setTimeout(flushCachesToStorage, CONFIG.CACHE_WRITE_INTERVAL_MS || 5000);
+}
+
+async function flushCachesToStorage() {
+  if (cacheFlushTimer) { clearTimeout(cacheFlushTimer); cacheFlushTimer = null; }
+  const payload = {};
+  try {
+    if (cachesDirty.classification) {
+      const serialized = {};
+      classificationCache.forEach((v, k) => { serialized[k] = v; });
+      payload.classificationCache = serialized;
+      cachesDirty.classification = false;
+    }
+    if (cachesDirty.detox) {
+      const serialized = {};
+      detoxCache.forEach((v, k) => { serialized[k] = v; });
+      payload.detoxCache = serialized;
+      cachesDirty.detox = false;
+    }
+    if (Object.keys(payload).length > 0) {
+      await storageSet(payload);
+    }
+  } catch (e) {
+    // ignore persistence errors for now
+    console.warn('Failed to flush caches to storage', e);
+  }
+}
+
+function markCacheDirty(kind) {
+  if (kind === 'classification') cachesDirty.classification = true;
+  if (kind === 'detox') cachesDirty.detox = true;
+  scheduleCachePersist();
+}
 
 // Delay helper
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -171,10 +211,7 @@ async function classifyText(text) {
 
     try {
       classificationCache.set(key, { ts: Date.now(), result });
-      // persist whole cache (simple approach)
-      const serialized = {};
-      classificationCache.forEach((v, k) => { serialized[k] = v; });
-      storageSet({ classificationCache: serialized });
+      markCacheDirty('classification');
     } catch (e) {}
 
     return result;
@@ -197,9 +234,7 @@ async function detoxifyTextSingle(text) {
     // cache that detox is not needed
     try {
       detoxCache.set(key, { ts: Date.now(), output: text });
-      const serialized = {};
-      detoxCache.forEach((v, k) => { serialized[k] = v; });
-      storageSet({ detoxCache: serialized });
+      markCacheDirty('detox');
     } catch (e) {}
     return {
       output: text,
@@ -225,9 +260,7 @@ async function detoxifyTextSingle(text) {
     text;
 
   try { detoxCache.set(key, { ts: Date.now(), output });
-    const serialized = {};
-    detoxCache.forEach((v, k) => { serialized[k] = v; });
-    storageSet({ detoxCache: serialized });
+    markCacheDirty('detox');
   } catch (e) {}
   return { output, attempts: r.attempts, error: null };
 }
@@ -317,6 +350,61 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ success: true });
       break;
 
+    case "clearCaches":
+      (async () => {
+        try {
+          classificationCache.clear();
+          detoxCache.clear();
+          cachesDirty = { classification: false, detox: false };
+          await storageSet({ classificationCache: {}, detoxCache: {} });
+          sendResponse({ success: true });
+        } catch (e) {
+          sendResponse({ success: false, error: String(e) });
+        }
+      })();
+      return true;
+
+    case "flushCaches":
+      (async () => {
+        try {
+          await flushCachesToStorage();
+          sendResponse({ success: true });
+        } catch (e) {
+          sendResponse({ success: false, error: String(e) });
+        }
+      })();
+      return true;
+
+    case "resetSettings":
+      (async () => {
+        try {
+          const defaults = {
+            TOXIC_CONFIDENCE_THRESHOLD: 98,
+            BATCH_DELAY: 100,
+            MAX_BATCH_SIZE: 8,
+            DETOX_CONCURRENCY: 4,
+            CACHE_TTL_MINUTES: 60,
+            LOG_CAP: 500
+          };
+          await storageSet({ extSettings: defaults });
+          // apply immediately
+          CONFIG.TOXIC_CONFIDENCE_THRESHOLD = Number(defaults.TOXIC_CONFIDENCE_THRESHOLD);
+          CONFIG.DETOX_CONCURRENCY = Number(defaults.DETOX_CONCURRENCY);
+          CONFIG.LOG_CAP = Number(defaults.LOG_CAP);
+          if (defaults.CACHE_TTL_MINUTES != null) {
+            CACHE_TTL_MS = Number(defaults.CACHE_TTL_MINUTES) * 60 * 1000;
+          }
+          // flush caches after resetting
+          await storageSet({ classificationCache: {}, detoxCache: {} });
+          classificationCache.clear(); detoxCache.clear();
+          cachesDirty = { classification: false, detox: false };
+          sendResponse({ success: true });
+        } catch (e) {
+          sendResponse({ success: false, error: String(e) });
+        }
+      })();
+      return true;
+
     case "classifyText":
       (async () => {
         try {
@@ -374,3 +462,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
   }
 });
+
+// Attempt to flush caches when the service worker is suspended
+try {
+  if (chrome.runtime && chrome.runtime.onSuspend) {
+    chrome.runtime.onSuspend.addListener(() => {
+      try { flushCachesToStorage(); } catch (e) {}
+    });
+  }
+} catch (e) {}
