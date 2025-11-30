@@ -67,8 +67,28 @@ let textElements = new Map();
 let processedHashes = new Set();
 let requestIdCounter = 1;
 
-const BATCH_DELAY = 100; // fast batching
-const MAX_BATCH_SIZE = 8; // flush immediately when this many items queued
+// runtime-configurable parameters (will be updated from storage)
+let BATCH_DELAY = 100; // default (ms)
+let MAX_BATCH_SIZE = 8; // default
+
+// load settings from storage if available
+try {
+  chrome.storage.local.get(['extSettings'], (res) => {
+    const s = res?.extSettings || {};
+    if (s.BATCH_DELAY != null) BATCH_DELAY = Number(s.BATCH_DELAY);
+    if (s.MAX_BATCH_SIZE != null) MAX_BATCH_SIZE = Number(s.MAX_BATCH_SIZE);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.extSettings && changes.extSettings.newValue) {
+      const s = changes.extSettings.newValue;
+      if (s.BATCH_DELAY != null) BATCH_DELAY = Number(s.BATCH_DELAY);
+      if (s.MAX_BATCH_SIZE != null) MAX_BATCH_SIZE = Number(s.MAX_BATCH_SIZE);
+    }
+  });
+} catch (e) {
+  /* ignore if storage not available */
+}
 
 function hashString(s) {
   let h = 2166136261 >>> 0;

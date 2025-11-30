@@ -1,0 +1,9 @@
+html,body{margin:0;padding:12px;font-family:system-ui, -apple-system, sans-serif;background:#fff}
+.container{max-width:680px}
+h2{margin:0 0 12px}
+.control{margin:12px 0}
+.control label{display:block;margin-bottom:6px;font-weight:600}
+input[type=range]{width:100%}
+.actions{display:flex;gap:8px;margin-top:14px}
+.clear-btn{font-size:12px;padding:6px 12px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer}
+.status{margin-top:10px;font-size:13px;color:#666}

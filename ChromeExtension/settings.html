@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Extension Advanced Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Advanced Settings</h2>
+
+    <div class="control">
+      <label>Toxicity Threshold: <span id="thresholdVal">98</span>%</label>
+      <input id="threshold" type="range" min="70" max="99" step="1">
+    </div>
+
+    <div class="control">
+      <label>Batch Delay (ms): <span id="batchDelayVal">100</span></label>
+      <input id="batchDelay" type="range" min="20" max="1000" step="10">
+    </div>
+
+    <div class="control">
+      <label>Max Batch Size: <span id="batchSizeVal">8</span></label>
+      <input id="batchSize" type="range" min="1" max="32" step="1">
+    </div>
+
+    <div class="control">
+      <label>Detox Concurrency: <span id="concurrencyVal">4</span></label>
+      <input id="concurrency" type="range" min="1" max="8" step="1">
+    </div>
+
+    <div class="control">
+      <label>Cache TTL (minutes): <span id="cacheTtlVal">60</span></label>
+      <input id="cacheTtl" type="range" min="10" max="1440" step="10">
+    </div>
+
+    <div class="control">
+      <label>Log Cap: <span id="logCapVal">500</span></label>
+      <input id="logCap" type="range" min="50" max="2000" step="50">
+    </div>
+
+    <div class="actions">
+      <button id="saveBtn" class="clear-btn">Save</button>
+      <button id="resetBtn" class="clear-btn">Reset Defaults</button>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

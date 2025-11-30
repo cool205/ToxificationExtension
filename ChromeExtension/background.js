@@ -13,7 +13,7 @@ const CONFIG = {
 // In-memory caches to reduce duplicate API calls for identical texts
 const classificationCache = new Map(); // key -> { ts, result }
 const detoxCache = new Map(); // key -> { ts, output }
-const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+let CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour (mutable)
 
 // Delay helper
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -57,6 +57,42 @@ function storageSet(obj) {
     /* ignore */
   }
 })();
+
+// Load extension settings and apply to runtime CONFIG
+(async function applyStoredSettings(){
+  try{
+    const s = await storageGet(['extSettings']);
+    const st = s.extSettings || {};
+    if (st.TOXIC_CONFIDENCE_THRESHOLD != null) CONFIG.TOXIC_CONFIDENCE_THRESHOLD = Number(st.TOXIC_CONFIDENCE_THRESHOLD);
+    if (st.DETOX_CONCURRENCY != null) CONFIG.DETOX_CONCURRENCY = Number(st.DETOX_CONCURRENCY);
+    if (st.LOG_CAP != null) CONFIG.LOG_CAP = Number(st.LOG_CAP);
+    if (st.CACHE_TTL_MINUTES != null) {
+      const mins = Number(st.CACHE_TTL_MINUTES);
+      if (!Number.isNaN(mins)) {
+        CACHE_TTL_MS = mins * 60 * 1000;
+      }
+    }
+  }catch(e){}
+})();
+
+// React to settings changes in storage
+try{
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.extSettings && changes.extSettings.newValue) {
+      const st = changes.extSettings.newValue;
+      if (st.TOXIC_CONFIDENCE_THRESHOLD != null) CONFIG.TOXIC_CONFIDENCE_THRESHOLD = Number(st.TOXIC_CONFIDENCE_THRESHOLD);
+      if (st.DETOX_CONCURRENCY != null) CONFIG.DETOX_CONCURRENCY = Number(st.DETOX_CONCURRENCY);
+      if (st.LOG_CAP != null) CONFIG.LOG_CAP = Number(st.LOG_CAP);
+      if (st.CACHE_TTL_MINUTES != null) {
+        const mins = Number(st.CACHE_TTL_MINUTES);
+        if (!Number.isNaN(mins)) {
+          CACHE_TTL_MS = mins * 60 * 1000;
+        }
+      }
+    }
+  });
+} catch(e) {}
 
 // Push with cap
 function pushWithCap(log, entry, cap = CONFIG.LOG_CAP) {

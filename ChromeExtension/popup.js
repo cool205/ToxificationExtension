@@ -227,6 +227,20 @@ highlightCheckbox.addEventListener('change', () => {
   else clearHighlightsOnPage();
 });
 
+// Open advanced settings page
+const openSettingsBtn = document.getElementById('openSettings');
+if (openSettingsBtn) {
+  openSettingsBtn.addEventListener('click', () => {
+    try {
+      const url = chrome.runtime.getURL('settings.html');
+      chrome.tabs.create({ url });
+    } catch (e) {
+      // fallback: open in same popup (not ideal)
+      window.open('settings.html', '_blank');
+    }
+  });
+}
+
 // Initial load
 loadAndRender();
 scheduleNextScan();
