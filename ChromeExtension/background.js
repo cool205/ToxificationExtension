@@ -1,11 +1,10 @@
-
 let detoxLog = [];
 let detectedLog = [];
 const connectedPorts = new Map();
 
 const CONFIG = {
   API_BASE: "https://TechKid0109-Detox-Extension.hf.space",
-  TOXIC_CONFIDENCE_THRESHOLD: 0.95,
+  TOXIC_CONFIDENCE_THRESHOLD: 90, // 90% threshold
   MAX_RETRIES: 4,
   LOG_CAP: 500
 };
@@ -13,15 +12,15 @@ const CONFIG = {
 // Delay helper
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Push with cap to avoid unbounded memory growth
+// Push with cap
 function pushWithCap(log, entry, cap = CONFIG.LOG_CAP) {
   log.push(entry);
   if (log.length > cap) log.shift();
 }
 
-// Exponential retry with backoff
+// Exponential retry
 async function fetchWithRetry(url, options, maxAttempts = CONFIG.MAX_RETRIES) {
-  const baseDelay = 1000; // 1s, 2s, 4s, 8s
+  const baseDelay = 1000;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -31,7 +30,7 @@ async function fetchWithRetry(url, options, maxAttempts = CONFIG.MAX_RETRIES) {
         lastError = new Error(`HTTP ${res.status}`);
         if (attempt < maxAttempts && (res.status === 429 || res.status >= 500)) {
           const delay = baseDelay * Math.pow(2, attempt - 1);
-          await wait(delay + Math.floor(Math.random() * 100)); // jitter
+          await wait(delay + Math.floor(Math.random() * 100));
           continue;
         }
         return { success: false, error: String(lastError), attempts: attempt };
@@ -42,7 +41,7 @@ async function fetchWithRetry(url, options, maxAttempts = CONFIG.MAX_RETRIES) {
       lastError = err;
       if (attempt < maxAttempts) {
         const delay = baseDelay * Math.pow(2, attempt - 1);
-        await wait(delay + Math.floor(Math.random() * 100)); // jitter
+        await wait(delay + Math.floor(Math.random() * 100));
         continue;
       }
       return { success: false, error: String(lastError), attempts: attempt };
@@ -56,20 +55,28 @@ async function classifyText(text) {
     const res = await fetchWithRetry(`${CONFIG.API_BASE}/classify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, threshold: CONFIG.TOXIC_CONFIDENCE_THRESHOLD })
+      body: JSON.stringify({ text })
     });
 
     if (!res.success) {
       return { success: false, error: res.error, attempts: res.attempts };
     }
 
-    // API returns { classification: "LABEL_0" or "LABEL_1", confidence: { LABEL_0: ..., LABEL_1: ... } }
-    // LABEL_0 = NOT toxic (clean), LABEL_1 = toxic
-    const label1Confidence = res.json?.confidence?.LABEL_1 || 0;
+    const data = res.json;
+    const conf = data?.confidence || {};
+    const label0Confidence = conf.LABEL_0 ?? 0;
+    const label1Confidence = conf.LABEL_1 ?? 0;
+
+    // Use classification string + threshold
+    const isToxic =
+      data.classification === "LABEL_1" &&
+      label1Confidence * 100 >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD;
+
     return {
       success: true,
-      isToxic: label1Confidence >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD,
-      confidence: label1Confidence,
+      classification: data.classification,
+      isToxic,
+      confidence: { label0: label0Confidence, label1: label1Confidence },
       attempts: res.attempts
     };
   } catch (err) {
@@ -113,22 +120,19 @@ async function detoxifyTextBatch(texts) {
     const capped = typeof t === "string" && t.length > 5000 ? t.slice(0, 5000) : t;
     const res = await detoxifyTextSingle(capped);
     results.push(res);
-    await wait(50 + Math.floor(Math.random() * 50)); // faster jitter delay
+    await wait(50 + Math.floor(Math.random() * 50));
   }
   return results;
 }
-
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case "logDetox":
       pushWithCap(detoxLog, msg.payload);
-      console.log("Detox log updated:", detoxLog);
       break;
 
     case "logDetected":
       pushWithCap(detectedLog, msg.payload);
-      console.log("Detected log updated:", detectedLog);
       break;
 
     case "getDetoxLog":
@@ -213,35 +217,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       })();
       return true;
-  }
-});
-
-
-chrome.runtime.onConnect.addListener(port => {
-  try {
-    const name = port.name || Math.random().toString(36).slice(2);
-    connectedPorts.set(name, port);
-    console.log("Port connected:", name);
-
-    port.onMessage.addListener(m => {
-      if (m?.type === "keepAlivePing") {
-        port.postMessage({ type: "keepAlivePong" });
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      connectedPorts.delete(name);
-      console.log("Port disconnected:", name);
-    });
-
-    // Auto-clean after 1h
-    setTimeout(() => {
-      if (connectedPorts.has(name)) {
-        connectedPorts.delete(name);
-        console.log("Port auto-cleaned:", name);
-      }
-    }, 60 * 60 * 1000);
-  } catch (err) {
-    console.warn("onConnect handler error", err);
   }
 });

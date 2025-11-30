@@ -1,4 +1,3 @@
-
 const createDetoxBadge = () => {
   if (document.getElementById("detoxBadge")) return;
 
@@ -34,7 +33,6 @@ const updateDetoxBadge = (count) => {
   badge._fadeTimeout = setTimeout(() => (badge.style.opacity = "0"), 3000);
 };
 
-
 async function sendBg(msg) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(msg, (response) => {
@@ -61,7 +59,6 @@ async function detoxifyTexts(texts) {
   if (!r.success) throw new Error(r.error || "detoxify failed");
   return r;
 }
-
 
 let batchQueue = [];
 let batchTimer = null;
@@ -92,11 +89,9 @@ function enqueue(nodes, text) {
 
   const id = requestIdCounter++;
 
-  // mark the parent early so popup/content can reference it while pending
   parent.dataset.textId = id;
   textElements.set(String(id), parent);
 
-  // log detected as pending (isToxic: null)
   sendBg({
     type: "logDetected",
     payload: {
@@ -107,18 +102,12 @@ function enqueue(nodes, text) {
     },
   });
 
-  batchQueue.push({
-    id,
-    nodes,
-    text,
-    parent,
-  });
+  batchQueue.push({ id, nodes, text, parent });
 
   if (!batchTimer) {
     batchTimer = setTimeout(flushBatch, BATCH_DELAY);
   }
 }
-
 
 async function flushBatch() {
   clearTimeout(batchTimer);
@@ -136,40 +125,39 @@ async function flushBatch() {
     const cleanItems = [];
 
     items.forEach((it, i) => {
-      if (toxicFlags[i]) toxicItems.push(it);
-      else cleanItems.push(it);
+      const flag = toxicFlags[i];
+      if (flag && flag.success && flag.isToxic) {
+        toxicItems.push(it);
+      } else {
+        cleanItems.push(it);
+      }
     });
 
-    // Non-toxic: mark only
+    // Non-toxic: mark green
     cleanItems.forEach((it) => {
-    it.parent.style.backgroundColor = "#e6ffed";
+      it.parent.style.backgroundColor = "#e6ffed";
+      it.parent.dataset.detoxified = "1";
+      it.parent.dataset.textId = it.id;
+      textElements.set(String(it.id), it.parent);
 
-    it.parent.dataset.detoxified = "1";
-    it.parent.dataset.textId = it.id;
-    textElements.set(String(it.id), it.parent);
-
-    sendBg({
-      type: "logDetected",
-      payload: {
-        text: it.text,
-        isToxic: false,
-        timestamp: new Date().toISOString(),
-      },
+      sendBg({
+        type: "logDetected",
+        payload: {
+          text: it.text,
+          isToxic: false,
+          timestamp: new Date().toISOString(),
+        },
+      });
     });
-  });
-
 
     if (toxicItems.length === 0) return;
 
-    // Detoxify
+    // Detoxify toxic items
     const toxTexts = toxicItems.map((i) => i.text);
-    const { outputs = [], attempts = [], errors = [] } =
-      await detoxifyTexts(toxTexts);
+    const { outputs = [], attempts = [], errors = [] } = await detoxifyTexts(toxTexts);
 
     toxicItems.forEach((it, index) => {
       const out = outputs[index] || it.text;
-
-      // Replace original text nodes
       const span = document.createElement("span");
       span.textContent = out;
 
@@ -208,7 +196,6 @@ async function flushBatch() {
     console.error("Batch failed:", err);
   }
 }
-
 
 const isVisible = (el) => {
   if (!el) return false;
@@ -258,7 +245,6 @@ function scan(root = document.body) {
   }
 }
 
-
 const mo = new MutationObserver((mut) => {
   for (const m of mut) {
     for (const node of m.addedNodes) {
@@ -267,7 +253,6 @@ const mo = new MutationObserver((mut) => {
   }
 });
 mo.observe(document.body, { childList: true, subtree: true });
-
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "highlightText") {
@@ -289,40 +274,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     scan();
     sendResponse({ success: true });
   }
-  
-  if (msg.type === 'applyColor') {
-    // msg.status: 'green' | 'yellow' | 'red' | 'brown'
+
+  if (msg.type === "applyColor") {
     const el = textElements.get(String(msg.id));
     if (el) {
-      // set a gentle background to indicate status
       switch (msg.status) {
-        case 'green':
-          el.style.transition = 'background-color 0.2s ease';
-          el.style.backgroundColor = '#e6ffed';
+        case "green":
+          el.style.transition = "background-color 0.2s ease";
+          el.style.backgroundColor = "#e6ffed";
           break;
-        case 'yellow':
-          el.style.transition = 'background-color 0.2s ease';
-          el.style.backgroundColor = '#fff8e1';
+        case "yellow":
+          el.style.transition = "background-color 0.2s ease";
+          el.style.backgroundColor = "#fff8e1";
           break;
-        case 'red':
-          el.style.transition = 'background-color 0.2s ease';
-          el.style.backgroundColor = '#ffecec';
+                case "red":
+          el.style.transition = "background-color 0.2s ease";
+          el.style.backgroundColor = "#ffecec";
           break;
-        case 'brown':
-          el.style.transition = 'background-color 0.2s ease';
-          el.style.backgroundColor = '#f3e6d6';
+        case "brown":
+          el.style.transition = "background-color 0.2s ease";
+          el.style.backgroundColor = "#f3e6d6";
           break;
       }
     }
   }
 
-  if (msg.type === 'removeColor') {
+  if (msg.type === "removeColor") {
     const el = textElements.get(String(msg.id));
     if (el) {
-      el.style.backgroundColor = '';
+      el.style.backgroundColor = "";
     }
   }
 });
 
-
+// Initial scan on page load
 scan();
