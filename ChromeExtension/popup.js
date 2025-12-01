@@ -92,21 +92,20 @@ async function loadAndRender() {
   totalCount.textContent = scanned.length;
   scannedList.innerHTML = '';
 
-  // Build items with computed statuses, then sort: Red, Green, Yellow, Brown
   const itemsWithStatus = scanned.map((item) => {
     const id = item.id != null ? String(item.id) : null;
     const text = item.text || '';
-    let status = 'yellow';
-    if (item.isToxic === null || item.isToxic === undefined) status = 'yellow';
-    else if (item.isToxic === false) status = 'green';
+    let status = 'unclassified';
+    if (item.isToxic === null || item.isToxic === undefined) status = 'unclassified';
+    else if (item.isToxic === false) status = 'non-toxic';
     else if (item.isToxic === true) {
       const d = id ? detoxById.get(id) : detoxByText.get(String(text));
-      status = d ? 'red' : 'brown';
+      status = d ? 'toxic' : 'ungenerated';
     }
     return { item, id, text, status };
   });
 
-  const order = { red: 0, green: 1, yellow: 2, brown: 3 };
+  const order = { toxic: 0, 'non-toxic': 1, unclassified: 2, ungenerated: 3 };
   itemsWithStatus.sort((a, b) => (order[a.status] - order[b.status]));
 
   for (const entry of itemsWithStatus) {
@@ -117,10 +116,28 @@ async function loadAndRender() {
 
     const badge = document.createElement('span');
     badge.className = `status-badge status-${status}`;
-    badge.textContent = status.toUpperCase();
+    // Friendly badge label
+    const labelMap = { 'toxic': 'Toxic', 'non-toxic': 'Non-toxic', 'unclassified': 'Unclassified', 'ungenerated': 'Ungenerated' };
+    badge.textContent = labelMap[status] || String(status).toUpperCase();
 
     const main = document.createElement('div');
-    main.innerHTML = escapeHtml(text);
+    // If toxic and we have a regenerated (detoxified) version, show both original and regenerated
+    if (status === 'toxic') {
+      const detoxEntry = (id && detoxById.get(id)) || detoxByText.get(String(text));
+      const originalDiv = document.createElement('div');
+      originalDiv.className = 'original-text';
+      originalDiv.innerHTML = escapeHtml(text);
+
+      const regenDiv = document.createElement('div');
+      regenDiv.className = 'regen-text';
+      const regenText = (detoxEntry && detoxEntry.detoxified) || (detoxEntry && detoxEntry.detoxified === undefined && detoxEntry.detoxified) || '';
+      regenDiv.innerHTML = escapeHtml(regenText || '');
+
+      main.appendChild(originalDiv);
+      main.appendChild(regenDiv);
+    } else {
+      main.innerHTML = escapeHtml(text);
+    }
 
     const meta = document.createElement('div');
     meta.className = 'meta';
@@ -182,12 +199,12 @@ async function applyHighlightsToPage() {
     const id = item.id != null ? String(item.id) : null;
     if (!id) continue;
 
-    let status = 'yellow';
-    if (item.isToxic === null || item.isToxic === undefined) status = 'yellow';
-    else if (item.isToxic === false) status = 'green';
+    let status = 'unclassified';
+    if (item.isToxic === null || item.isToxic === undefined) status = 'unclassified';
+    else if (item.isToxic === false) status = 'non-toxic';
     else if (item.isToxic === true) {
       const d = detoxById.get(id) || detoxByText.get(String(item.text));
-      status = d ? 'red' : 'brown';
+      status = d ? 'toxic' : 'ungenerated';
     }
 
     await sendMessageToTab({ type: 'applyColor', id, status });
@@ -247,3 +264,28 @@ scheduleNextScan();
 
 // Update scan status every 200ms
 setInterval(updateScanStatus, 200);
+ 
+// Sync highlight checkbox with page state on open
+async function syncHighlightToggle() {
+  try {
+    const state = await sendMessageToTab({ type: 'checkHighlights' });
+    if (state && typeof state.hasHighlights === 'boolean') {
+      highlightCheckbox.checked = state.hasHighlights;
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Initialize highlight checkbox state and ensure toggle behavior is safe
+syncHighlightToggle();
+
+// Wrap toggle with disable while applying to avoid double-click issues
+highlightCheckbox.addEventListener('change', async () => {
+  highlightCheckbox.disabled = true;
+  try {
+    if (highlightCheckbox.checked) await applyHighlightsToPage();
+    else await clearHighlightsOnPage();
+  } catch (e) {}
+  highlightCheckbox.disabled = false;
+});

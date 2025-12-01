@@ -86,9 +86,12 @@ body {
   margin-left: 8px;
 }
 
-.status-green { background: #e6ffed; color: #006400; }
-.status-yellow { background: #fff8e1; color: #8a6d00; }
-.status-red { background: #ffecec; color: #b30000; }
-.status-brown { background: #f3e6d6; color: #6b3f00; }
+.status-non-toxic { background: #e6ffed; color: #006400; }
+.status-unclassified { background: #fff8e1; color: #8a6d00; }
+.status-toxic { background: #ffecec; color: #b30000; }
+.status-ungenerated { background: #f3e6d6; color: #6b3f00; }
 
 .meta { margin-top: 6px; font-size: 11px; color: #666; }
+
+.original-text { text-decoration: line-through; color: #666; font-size: 12px; margin-bottom: 6px; }
+.regen-text { font-weight: 600; color: #222; font-size: 13px; }

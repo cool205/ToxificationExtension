@@ -329,23 +329,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const el = textElements.get(String(msg.id));
     if (el) {
       switch (msg.status) {
-        case "green":
+        case "non-toxic":
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#e6ffed";
           break;
-        case "yellow":
+        case "unclassified":
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#fff8e1";
           break;
-        case "red":
+        case "toxic":
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#ffecec";
           break;
-        case "brown":
+        case "ungenerated":
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#f3e6d6";
           break;
       }
+      try { el.dataset.highlighted = "1"; } catch (e) {}
     }
   }
 
@@ -353,7 +354,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const el = textElements.get(String(msg.id));
     if (el) {
       el.style.backgroundColor = "";
+      try { el.removeAttribute('data-highlighted'); } catch (e) {}
     }
+  }
+
+  if (msg.type === 'checkHighlights') {
+    try {
+      let any = false;
+      textElements.forEach((el) => {
+        if (el && el.dataset && el.dataset.highlighted === '1') any = true;
+      });
+      sendResponse && sendResponse({ hasHighlights: any });
+    } catch (e) {
+      sendResponse && sendResponse({ hasHighlights: false });
+    }
+    return true;
   }
 });
 
