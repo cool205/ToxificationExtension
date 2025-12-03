@@ -35,22 +35,33 @@ const updateDetoxBadge = (count) => {
 
 async function sendBg(msg) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(msg, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve({
-          success: false,
-          error: chrome.runtime.lastError.message,
-        });
-        return;
-      }
-      resolve(response || { success: false, error: "No response" });
-    });
+    try {
+      chrome.runtime.sendMessage(msg, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            success: false,
+            error: chrome.runtime.lastError.message,
+          });
+          return;
+        }
+        resolve(response || { success: false, error: "No response" });
+      });
+    } catch (e) {
+      resolve({ success: false, error: e.message });
+    }
   });
 }
 
 async function classifyTexts(texts) {
   const r = await sendBg({ type: "classifyText", texts });
-  if (!r.success) throw new Error(r.error || "classification failed");
+  if (!r.success) {
+    if (r.error.includes("context invalidated")) {
+      // Retry once after a short delay
+      await new Promise(res => setTimeout(res, 500));
+      return classifyTexts(texts);
+    }
+    throw new Error(r.error || "classification failed");
+  }
   return r.results;
 }
 
