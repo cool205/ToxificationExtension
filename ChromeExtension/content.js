@@ -75,12 +75,22 @@ let batchQueue = [];
 let batchTimer = null;
 let totalDetoxified = 0;
 let textElements = new Map();
-let processedHashes = new Set();
+// use a Map for processed hashes so we can cap and evict old entries
+let processedHashes = new Map();
 let requestIdCounter = 1;
 
 // runtime-configurable parameters (will be updated from storage)
-let BATCH_DELAY = 100; // default (ms)
-let MAX_BATCH_SIZE = 8; // default
+let BATCH_DELAY = 50; // default (ms)
+let MAX_BATCH_SIZE = 16; // default
+let MIN_GROUP_CHARS = 30; // minimum chars in grouped text to enqueue
+let MIN_NODE_CHARS = 3; // minimum chars for an individual text node to be considered
+let MUTATION_DEBOUNCE_MS = 60; // debounce mutations
+let PROCESSED_HASH_CAP = 10000; // cap for processedHashes
+let USE_REQUEST_IDLE = true; // prefer requestIdleCallback for background work
+
+// mutation batching
+const mutationQueue = new Set();
+let mutationTimer = null;
 
 // load settings from storage if available
 try {
@@ -88,6 +98,11 @@ try {
     const s = res?.extSettings || {};
     if (s.BATCH_DELAY != null) BATCH_DELAY = Number(s.BATCH_DELAY);
     if (s.MAX_BATCH_SIZE != null) MAX_BATCH_SIZE = Number(s.MAX_BATCH_SIZE);
+    if (s.MIN_GROUP_CHARS != null) MIN_GROUP_CHARS = Number(s.MIN_GROUP_CHARS);
+    if (s.MIN_NODE_CHARS != null) MIN_NODE_CHARS = Number(s.MIN_NODE_CHARS);
+    if (s.MUTATION_DEBOUNCE_MS != null) MUTATION_DEBOUNCE_MS = Number(s.MUTATION_DEBOUNCE_MS);
+    if (s.PROCESSED_HASH_CAP != null) PROCESSED_HASH_CAP = Number(s.PROCESSED_HASH_CAP);
+    if (s.USE_REQUEST_IDLE != null) USE_REQUEST_IDLE = !!s.USE_REQUEST_IDLE;
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -95,6 +110,11 @@ try {
       const s = changes.extSettings.newValue;
       if (s.BATCH_DELAY != null) BATCH_DELAY = Number(s.BATCH_DELAY);
       if (s.MAX_BATCH_SIZE != null) MAX_BATCH_SIZE = Number(s.MAX_BATCH_SIZE);
+      if (s.MIN_GROUP_CHARS != null) MIN_GROUP_CHARS = Number(s.MIN_GROUP_CHARS);
+      if (s.MIN_NODE_CHARS != null) MIN_NODE_CHARS = Number(s.MIN_NODE_CHARS);
+      if (s.MUTATION_DEBOUNCE_MS != null) MUTATION_DEBOUNCE_MS = Number(s.MUTATION_DEBOUNCE_MS);
+      if (s.PROCESSED_HASH_CAP != null) PROCESSED_HASH_CAP = Number(s.PROCESSED_HASH_CAP);
+      if (s.USE_REQUEST_IDLE != null) USE_REQUEST_IDLE = !!s.USE_REQUEST_IDLE;
     }
   });
 } catch (e) {
@@ -117,7 +137,17 @@ function enqueue(nodes, text) {
 
   const h = hashString(text);
   if (processedHashes.has(h)) return;
-  processedHashes.add(h);
+  // mark processed and cap the map size
+  processedHashes.set(h, Date.now());
+  if (processedHashes.size > PROCESSED_HASH_CAP) {
+    // evict oldest
+    let oldestKey = null;
+    let oldestTs = Infinity;
+    for (const [k, ts] of processedHashes.entries()) {
+      if (ts < oldestTs) { oldestTs = ts; oldestKey = k; }
+    }
+    if (oldestKey) processedHashes.delete(oldestKey);
+  }
 
   const id = requestIdCounter++;
 
@@ -271,14 +301,18 @@ function scan(root = document.body) {
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => {
-      const t = node.textContent.trim();
-      if (!t) return NodeFilter.FILTER_REJECT;
+      // fast checks: small trim and length checks
+      const txt = node.textContent;
+      if (!txt) return NodeFilter.FILTER_REJECT;
+      const trimmed = txt.trim();
+      if (!trimmed) return NodeFilter.FILTER_REJECT;
+      if (trimmed.length < MIN_NODE_CHARS || trimmed.length > 2000) return NodeFilter.FILTER_REJECT;
       const p = node.parentElement;
-      if (!p || !isVisible(p)) return NodeFilter.FILTER_REJECT;
+      if (!p) return NodeFilter.FILTER_REJECT;
       try {
         if (p.closest && p.closest('[data-detoxified="1"]')) return NodeFilter.FILTER_REJECT;
       } catch (e) {}
-      if (t.length < 10 || t.length > 1000) return NodeFilter.FILTER_REJECT;
+      if (!isVisible(p)) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
     },
   });
@@ -292,7 +326,7 @@ function scan(root = document.body) {
 
     if (p !== lastParent && textNodes.length > 0) {
       const text = textNodes.map((x) => x.textContent).join(" ").trim();
-      if (text.length >= 40) enqueue(textNodes, text);
+      if (text.length >= MIN_GROUP_CHARS) enqueue(textNodes, text);
       textNodes = [];
     }
 
@@ -302,18 +336,36 @@ function scan(root = document.body) {
 
   if (textNodes.length > 0) {
     const text = textNodes.map((x) => x.textContent).join(" ").trim();
-    if (text.length >= 40) enqueue(textNodes, text);
+    if (text.length >= MIN_GROUP_CHARS) enqueue(textNodes, text);
   }
 }
 
 const mo = new MutationObserver((mut) => {
   for (const m of mut) {
     for (const node of m.addedNodes) {
-      if (node.nodeType === Node.ELEMENT_NODE) scan(node);
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        mutationQueue.add(node);
+      }
     }
   }
+  if (mutationTimer) clearTimeout(mutationTimer);
+  mutationTimer = setTimeout(processMutationQueue, MUTATION_DEBOUNCE_MS);
 });
 mo.observe(document.body, { childList: true, subtree: true });
+
+function processMutationQueue() {
+  mutationTimer = null;
+  if (mutationQueue.size === 0) return;
+  const roots = Array.from(mutationQueue);
+  mutationQueue.clear();
+  const work = () => {
+    for (const r of roots) {
+      try { scan(r); } catch (e) {}
+    }
+  };
+  if (USE_REQUEST_IDLE && typeof requestIdleCallback === 'function') requestIdleCallback(work, { timeout: 100 });
+  else setTimeout(work, 0);
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "highlightText") {
@@ -385,3 +437,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // Initial scan on page load
 scan();
+// schedule quick re-scans to catch dynamic content loading (e.g., Gmail)
+setTimeout(() => { try { scan(); } catch (e) {} }, 300);
+setTimeout(() => { try { scan(); } catch (e) {} }, 1500);
+
+// Retry scanning when page becomes visible or gains focus
+try {
+  window.addEventListener('DOMContentLoaded', () => { scan(); });
+  window.addEventListener('load', () => { scan(); });
+  window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scan(); });
+  window.addEventListener('focus', () => { scan(); });
+  window.addEventListener('pageshow', () => { scan(); });
+} catch (e) {}
