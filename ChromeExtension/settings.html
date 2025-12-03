@@ -10,33 +10,39 @@
     <h2>Advanced Settings</h2>
 
     <div class="control">
-      <label>Toxicity Threshold: <span id="thresholdVal">98</span>%</label>
-      <input id="threshold" type="range" min="70" max="99" step="1">
+      <label>Accuracy Level (confidence %): <span id="thresholdVal">98.0</span>%</label>
+      <input id="threshold" type="range" min="0" max="1000" step="1">
+      <div class="desc">Adjust how confident the classifier must be before labeling text as toxic. Range 80.0–99.9; slider is skewed to give fine control near high values (98, 99%).</div>
     </div>
 
     <div class="control">
       <label>Batch Delay (ms): <span id="batchDelayVal">100</span></label>
       <input id="batchDelay" type="range" min="20" max="1000" step="10">
+      <div class="desc">Delay before sending a collected batch for classification. Lower values reduce latency but may increase API calls.</div>
     </div>
 
     <div class="control">
       <label>Max Batch Size: <span id="batchSizeVal">8</span></label>
       <input id="batchSize" type="range" min="1" max="32" step="1">
+      <div class="desc">Maximum number of text groups sent per classification/detox request. Larger batches increase throughput but may delay the first results.</div>
     </div>
 
     <div class="control">
       <label>Detox Concurrency: <span id="concurrencyVal">4</span></label>
       <input id="concurrency" type="range" min="1" max="8" step="1">
+      <div class="desc">Parallel detox requests to the backend to speed up processing of toxic texts.</div>
     </div>
 
     <div class="control">
       <label>Cache TTL (minutes): <span id="cacheTtlVal">60</span></label>
       <input id="cacheTtl" type="range" min="10" max="1440" step="10">
+      <div class="desc">How long classification/detox results are kept in the in-memory cache before expiring.</div>
     </div>
 
     <div class="control">
       <label>Log Cap: <span id="logCapVal">500</span></label>
       <input id="logCap" type="range" min="50" max="2000" step="50">
+      <div class="desc">Maximum number of log entries stored for detections and detox operations.</div>
     </div>
 
     <div class="actions">

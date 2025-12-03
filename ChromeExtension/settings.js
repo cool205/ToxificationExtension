@@ -8,6 +8,26 @@
     LOG_CAP: 500
   };
 
+  // Slider mapping settings for the accuracy threshold
+  const THRESHOLD_MIN = 80.0;
+  const THRESHOLD_MAX = 99.9;
+  const SLIDER_MAX = 1000; // slider 0..1000 for fine control
+  const THRESH_EXP = 4; // exponent used to skew slider towards high end
+
+  function sliderToThreshold(sliderVal) {
+    const t = Number(sliderVal) / SLIDER_MAX; // 0..1
+    // skew towards high values: use 1 - (1 - t)^exp interpolation
+    const frac = 1 - Math.pow(1 - t, THRESH_EXP);
+    return THRESHOLD_MIN + frac * (THRESHOLD_MAX - THRESHOLD_MIN);
+  }
+
+  function thresholdToSlider(threshold) {
+    const clamped = Math.max(THRESHOLD_MIN, Math.min(THRESHOLD_MAX, Number(threshold)));
+    const frac = (clamped - THRESHOLD_MIN) / (THRESHOLD_MAX - THRESHOLD_MIN);
+    const t = 1 - Math.pow(1 - frac, 1 / THRESH_EXP);
+    return Math.round(t * SLIDER_MAX);
+  }
+
   const els = {
     threshold: document.getElementById('threshold'),
     thresholdVal: document.getElementById('thresholdVal'),
@@ -28,8 +48,10 @@
   };
 
   function setValuesFrom(settings){
-    els.threshold.value = settings.TOXIC_CONFIDENCE_THRESHOLD;
-    els.thresholdVal.textContent = settings.TOXIC_CONFIDENCE_THRESHOLD;
+    // threshold slider uses skewed mapping for fine control at high values
+    const thr = (settings.TOXIC_CONFIDENCE_THRESHOLD != null) ? Number(settings.TOXIC_CONFIDENCE_THRESHOLD) : defaults.TOXIC_CONFIDENCE_THRESHOLD;
+    els.threshold.value = thresholdToSlider(thr);
+    els.thresholdVal.textContent = sliderToThreshold(els.threshold.value).toFixed(1);
     els.batchDelay.value = settings.BATCH_DELAY;
     els.batchDelayVal.textContent = settings.BATCH_DELAY;
     els.batchSize.value = settings.MAX_BATCH_SIZE;
@@ -44,7 +66,7 @@
 
   function readInputs(){
     return {
-      TOXIC_CONFIDENCE_THRESHOLD: Number(els.threshold.value),
+      TOXIC_CONFIDENCE_THRESHOLD: Number(sliderToThreshold(els.threshold.value).toFixed(1)),
       BATCH_DELAY: Number(els.batchDelay.value),
       MAX_BATCH_SIZE: Number(els.batchSize.value),
       DETOX_CONCURRENCY: Number(els.concurrency.value),
@@ -72,7 +94,11 @@
   }
 
   // wire sliders to display
-  ['threshold','batchDelay','batchSize','concurrency','cacheTtl','logCap'].forEach(id => {
+  // threshold needs a special mapping
+  els.threshold.addEventListener('input', () => {
+    els.thresholdVal.textContent = sliderToThreshold(els.threshold.value).toFixed(1);
+  });
+  ['batchDelay','batchSize','concurrency','cacheTtl','logCap'].forEach(id => {
     const el = document.getElementById(id);
     const val = document.getElementById(id + 'Val');
     el.addEventListener('input', () => { val.textContent = el.value; });
@@ -115,6 +141,8 @@
     const s = await load();
     // convert minutes TTL to minutes stored
     s.CACHE_TTL_MINUTES = s.CACHE_TTL_MINUTES || defaults.CACHE_TTL_MINUTES;
+    // ensure threshold default available
+    if (s.TOXIC_CONFIDENCE_THRESHOLD == null) s.TOXIC_CONFIDENCE_THRESHOLD = defaults.TOXIC_CONFIDENCE_THRESHOLD;
     setValuesFrom(Object.assign({}, defaults, s));
   })();
 })();
