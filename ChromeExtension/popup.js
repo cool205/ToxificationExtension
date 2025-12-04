@@ -126,7 +126,13 @@ async function loadAndRender() {
       badge.title = 'Blocked (made unreadable)';
       badge.classList.add('status-blocked');
     } else {
-      badge.textContent = labelMap[status] || String(status).toUpperCase();
+      const baseLbl = labelMap[status] || String(status).toUpperCase();
+      // Add confidence percentage if available for toxic/non-toxic
+      if ((status === 'toxic' || status === 'non-toxic') && item.toxicPercentage != null) {
+        badge.textContent = `${baseLbl} ${item.toxicPercentage.toFixed(1)}%`;
+      } else {
+        badge.textContent = baseLbl;
+      }
     }
 
     const main = document.createElement('div');

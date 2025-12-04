@@ -178,6 +178,7 @@ async function classifyText(text) {
     const now = Date.now();
     const cached = classificationCache.get(key);
     if (cached && now - cached.ts < CACHE_TTL_MS) {
+      console.log(`[classify] CACHE HIT: isToxic=${cached.result.isToxic}`);
       return Object.assign({}, cached.result, { cached: true });
     }
 
@@ -193,19 +194,29 @@ async function classifyText(text) {
 
     const data = res.json;
     const conf = data?.confidence || {};
-    const label0Confidence = conf.LABEL_0 ?? 0;
-    const label1Confidence = conf.LABEL_1 ?? 0;
-
-    // Use classification string + threshold
+    
+    // Support both old format (LABEL_0/LABEL_1) and new format (non-toxic/toxic)
+    const label0Confidence = conf.LABEL_0 ?? conf['non-toxic'] ?? 0;
+    let toxicConfidence = conf.LABEL_1 ?? conf.toxic ?? 0;
+    const classification = data.classification;
+    
+    // Convert to percentage for consistent comparison
+    const toxicPercentage = toxicConfidence * 100;
+    
+    // Normalize classification to "toxic" or "non-toxic"
     const isToxic =
-      data.classification === "LABEL_1" &&
-      label1Confidence * 100 >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD;
+      (classification === "toxic" || classification === "LABEL_1") &&
+      toxicPercentage >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD;
+
+    // Debug logging
+    console.log(`[classify] text="${String(text).slice(0, 50)}..." classification=${classification} toxic=${toxicPercentage.toFixed(2)}% threshold=${CONFIG.TOXIC_CONFIDENCE_THRESHOLD}% isToxic=${isToxic}`);
 
     const result = {
       success: true,
       classification: data.classification,
       isToxic,
-      confidence: { label0: label0Confidence, label1: label1Confidence },
+      confidence: { label0: label0Confidence, label1: toxicConfidence },
+      toxicPercentage,
       attempts: res.attempts
     };
 
@@ -254,10 +265,17 @@ async function detoxifyTextSingle(text) {
   }
 
   const json = r.json || {};
-  const output =
-    json.detoxified ||
-    (Array.isArray(json.data) ? json.data[0] : Array.isArray(json.output) ? json.output[0] : text) ||
-    text;
+  // Support both old format and new format
+  let output = text;
+  if (Array.isArray(json.detoxified) && json.detoxified.length > 0) {
+    output = json.detoxified[0];
+  } else if (json.detoxified) {
+    output = json.detoxified;
+  } else if (Array.isArray(json.data) && json.data.length > 0) {
+    output = json.data[0];
+  } else if (Array.isArray(json.output) && json.output.length > 0) {
+    output = json.output[0];
+  }
 
   try { detoxCache.set(key, { ts: Date.now(), output });
     markCacheDirty('detox');
@@ -334,6 +352,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           id: e.id ?? null,
           text: e.text,
           isToxic: e.isToxic,
+          toxicPercentage: e.toxicPercentage ?? null,
           timestamp: e.timestamp ?? null,
           tabId: e.tabId ?? null,
           pageUrl: e.pageUrl ?? null

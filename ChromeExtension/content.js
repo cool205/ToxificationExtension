@@ -163,6 +163,7 @@ function enqueue(nodes, text) {
       id,
       text,
       isToxic: null,
+      toxicPercentage: null,
       timestamp: new Date().toISOString(),
     },
   });
@@ -217,6 +218,7 @@ async function flushBatch() {
           id: it.id,
           text: it.text,
           isToxic: false,
+          toxicPercentage: null,
           timestamp: new Date().toISOString(),
         },
       });
@@ -322,6 +324,7 @@ async function flushBatch() {
             id: it.id,
             text: it.text,
             isToxic: true,
+            toxicPercentage: flag.toxicPercentage ?? null,
             timestamp: new Date().toISOString(),
           },
         });
