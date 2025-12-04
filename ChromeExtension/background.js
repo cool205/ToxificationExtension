@@ -1,6 +1,5 @@
 let detoxLog = [];
 let detectedLog = [];
-let unblockList = []; // Track which items have been unblocked by ID
 const connectedPorts = new Map();
 
 const CONFIG = {
@@ -343,7 +342,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           id: e.id ?? null,
           original: e.original,
           detoxified: e.detoxified,
-          blocked: (e.blocked === true && !unblockList.includes(e.id)),
+          blocked: e.blocked === true,
           attempts: e.attempts,
           error: e.error,
           tabId: e.tabId ?? null,
@@ -357,8 +356,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           timestamp: e.timestamp ?? null,
           tabId: e.tabId ?? null,
           pageUrl: e.pageUrl ?? null
-        })),
-        unblockList
+        }))
       });
       break;
 
@@ -426,22 +424,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       })();
       return true;
-
-    case "markUnblocked":
-      // Mark an item as unblocked so it won't be shown as blocked in the popup
-      if (msg.ids && Array.isArray(msg.ids)) {
-        msg.ids.forEach(id => {
-          if (!unblockList.includes(id)) {
-            unblockList.push(id);
-          }
-        });
-      } else if (msg.id) {
-        if (!unblockList.includes(msg.id)) {
-          unblockList.push(msg.id);
-        }
-      }
-      sendResponse({ success: true });
-      break;
 
     case "classifyText":
       (async () => {

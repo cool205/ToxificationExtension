@@ -133,6 +133,17 @@ function hashString(s) {
   return h.toString(16);
 }
 
+function normalizeForCompare(s) {
+  if (s == null) return '';
+  // Remove common prefixes like 'detoxify:' and normalize whitespace/punctuation/case
+  let t = String(s).replace(/^\s*detoxify:\s*/i, '');
+  // Normalize HTML entities if any (basic common ones)
+  t = t.replace(/&nbsp;/gi, ' ');
+  // Remove punctuation (keep word characters and spaces), collapse whitespace, lowercase
+  t = t.replace(/[\W_]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  return t;
+}
+
 function enqueue(nodes, text) {
   const parent = nodes[0]?.parentNode;
   if (!parent) return;
@@ -236,7 +247,9 @@ async function flushBatch() {
         // If detoxified output equals original (no change), mark as blocked visually
         const origTrim = String(it.text || '').trim();
         const outTrim = String(out || '').trim();
-        if (outTrim === origTrim) {
+        // Compare normalized forms so small differences (punctuation, case, whitespace)
+        // won't prevent detection of identical outputs.
+        if (normalizeForCompare(outTrim) === normalizeForCompare(origTrim)) {
           // Create blocked element according to BLOCK_MODE
           const span = document.createElement("span");
           span.dataset.detoxified = "1";
@@ -500,50 +513,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } catch (e) {}
       try { el.removeAttribute('data-highlighted'); } catch (e) {}
     }
-  }
-
-  if (msg.type === 'unblock') {
-    const id = String(msg.id);
-    const el = textElements.get(id);
-    if (el) {
-      try {
-        const span = el.querySelector(`[data-text-id="${id}"]`) || el.querySelector('[data-blocked="1"]') || el.querySelector('[data-detoxified="1"]');
-        if (span) {
-          const original = msg.original || span.dataset?.original || span.textContent || '';
-          const tn = document.createTextNode(original);
-          span.parentNode.replaceChild(tn, span);
-          try { el.removeAttribute('data-detoxified'); } catch (e) {}
-          try { el.removeAttribute('data-highlighted'); } catch (e) {}
-        }
-      } catch (e) {}
-    }
-    // Notify background that this item has been unblocked
-    sendBg({ type: 'markUnblocked', id });
-    sendResponse && sendResponse({ success: true });
-    return true;
-  }
-
-  if (msg.type === 'unblockMultiple') {
-    const list = Array.isArray(msg.ids) ? msg.ids : [];
-    for (const rawId of list) {
-      const id = String(rawId);
-      const el = textElements.get(id);
-      if (!el) continue;
-      try {
-        const span = el.querySelector(`[data-text-id="${id}"]`) || el.querySelector('[data-blocked="1"]') || el.querySelector('[data-detoxified="1"]');
-        if (span) {
-          const original = (msg.originals && msg.originals[String(id)]) || span.dataset?.original || span.textContent || '';
-          const tn = document.createTextNode(original);
-          span.parentNode.replaceChild(tn, span);
-          try { el.removeAttribute('data-detoxified'); } catch (e) {}
-          try { el.removeAttribute('data-highlighted'); } catch (e) {}
-        }
-      } catch (e) {}
-    }
-    // Notify background that these items have been unblocked
-    sendBg({ type: 'markUnblocked', ids: list });
-    sendResponse && sendResponse({ success: true });
-    return true;
   }
 
   if (msg.type === 'checkHighlights') {

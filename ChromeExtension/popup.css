@@ -100,4 +100,3 @@ body {
 .original-text { text-decoration: line-through; color: #666; font-size: 12px; margin-bottom: 6px; }
 .regen-text { font-weight: 600; color: #222; font-size: 13px; }
 .blocked-note { color: #8b0000; font-size: 12px; margin-top: 6px; font-weight: 600; }
-.unblock-btn { margin-left: 8px; padding: 3px 8px; font-size: 12px; }

@@ -64,7 +64,6 @@ async function loadAndRender() {
 
   const pairs = res.pairs || [];
   let scanned = res.allScanned || [];
-  const unblockList = res.unblockList || [];
 
   // Get active tab id to filter logs for the current page
   const activeTab = await new Promise((resolve) => {
@@ -102,8 +101,7 @@ async function loadAndRender() {
     else if (item.isToxic === true) {
       const d = id ? detoxById.get(id) : detoxByText.get(String(text));
       if (d) {
-        // Only show as blocked if not in unblockList
-        status = (d.blocked && !unblockList.includes(id)) ? 'blocked' : 'toxic';
+        status = d.blocked ? 'blocked' : 'toxic';
       } else {
         status = 'ungenerated';
       }
@@ -171,21 +169,6 @@ async function loadAndRender() {
     const ts = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
     meta.textContent = ts + (id ? ` | id: ${id}` : '');
 
-    // If this item is blocked, add an Unblock button into the meta area
-    if (status === 'blocked') {
-      const unblockBtn = document.createElement('button');
-      unblockBtn.className = 'clear-btn unblock-btn';
-      unblockBtn.textContent = 'Unblock';
-      unblockBtn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        const detoxEntry = (id && detoxById.get(id)) || detoxByText.get(String(text));
-        const original = (detoxEntry && detoxEntry.original) || text;
-        await sendMessageToTab({ type: 'unblock', id, original });
-        setTimeout(loadAndRender, 300);
-      });
-      meta.appendChild(unblockBtn);
-    }
-
     div.appendChild(badge);
     div.appendChild(main);
     div.appendChild(meta);
@@ -202,35 +185,6 @@ async function loadAndRender() {
   if (highlightCheckbox.checked) {
     applyHighlightsToPage();
   }
-}
-
-// Unblock All button handling
-const unblockAllBtn = document.getElementById('unblockAll');
-if (unblockAllBtn) {
-  unblockAllBtn.addEventListener('click', async () => {
-    // fetch logs and active tab to determine blocked items for this page
-    const res = await sendToBackground({ type: 'getDetoxLog' });
-    if (!res) return;
-    let pairs = res.pairs || [];
-    const activeTab = await new Promise((resolve) => {
-      try { chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve((tabs && tabs[0]) || null)); }
-      catch (e) { resolve(null); }
-    });
-    const activeTabId = activeTab ? activeTab.id : null;
-    if (activeTabId != null) pairs = pairs.filter(p => p.tabId === activeTabId);
-
-    const ids = [];
-    const originals = {};
-    for (const p of pairs) {
-      if (p.blocked && p.id != null) {
-        ids.push(String(p.id));
-        originals[String(p.id)] = p.original;
-      }
-    }
-    if (ids.length === 0) return;
-    await sendMessageToTab({ type: 'unblockMultiple', ids, originals });
-    setTimeout(loadAndRender, 400);
-  });
 }
 
 // Refresh popup when the active tab changes or finishes loading
