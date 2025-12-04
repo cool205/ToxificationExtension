@@ -1,5 +1,6 @@
 let detoxLog = [];
 let detectedLog = [];
+let unblockList = []; // Track which items have been unblocked by ID
 const connectedPorts = new Map();
 
 const CONFIG = {

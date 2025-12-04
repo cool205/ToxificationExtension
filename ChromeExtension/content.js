@@ -200,6 +200,8 @@ async function flushBatch() {
     items.forEach((it, i) => {
       const flag = toxicFlags[i];
       if (flag && flag.success && flag.isToxic) {
+        // Store the flag with the item for later use
+        it.classificationFlag = flag;
         toxicItems.push(it);
       } else {
         cleanItems.push(it);
@@ -324,7 +326,7 @@ async function flushBatch() {
             id: it.id,
             text: it.text,
             isToxic: true,
-            toxicPercentage: flag.toxicPercentage ?? null,
+            toxicPercentage: (it.classificationFlag && it.classificationFlag.toxicPercentage) ?? null,
             timestamp: new Date().toISOString(),
           },
         });
