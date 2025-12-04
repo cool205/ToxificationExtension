@@ -87,6 +87,7 @@ let MIN_NODE_CHARS = 3; // minimum chars for an individual text node to be consi
 let MUTATION_DEBOUNCE_MS = 60; // debounce mutations
 let PROCESSED_HASH_CAP = 10000; // cap for processedHashes
 let USE_REQUEST_IDLE = true; // prefer requestIdleCallback for background work
+let BLOCK_MODE = 'colormatch'; // 'colormatch' | 'blur' | 'remove'
 
 // mutation batching
 const mutationQueue = new Set();
@@ -103,6 +104,7 @@ try {
     if (s.MUTATION_DEBOUNCE_MS != null) MUTATION_DEBOUNCE_MS = Number(s.MUTATION_DEBOUNCE_MS);
     if (s.PROCESSED_HASH_CAP != null) PROCESSED_HASH_CAP = Number(s.PROCESSED_HASH_CAP);
     if (s.USE_REQUEST_IDLE != null) USE_REQUEST_IDLE = !!s.USE_REQUEST_IDLE;
+    if (s.BLOCK_MODE) BLOCK_MODE = String(s.BLOCK_MODE);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -115,6 +117,7 @@ try {
       if (s.MUTATION_DEBOUNCE_MS != null) MUTATION_DEBOUNCE_MS = Number(s.MUTATION_DEBOUNCE_MS);
       if (s.PROCESSED_HASH_CAP != null) PROCESSED_HASH_CAP = Number(s.PROCESSED_HASH_CAP);
       if (s.USE_REQUEST_IDLE != null) USE_REQUEST_IDLE = !!s.USE_REQUEST_IDLE;
+      if (s.BLOCK_MODE) BLOCK_MODE = String(s.BLOCK_MODE);
     }
   });
 } catch (e) {
@@ -226,38 +229,92 @@ async function flushBatch() {
       toxicItems.forEach((it, index) => {
         let out = outputs[index] || it.text;
         out = String(out).replace(/^\s*detoxify:\s*/i, "");
+        // If detoxified output equals original (no change), mark as blocked visually
+        const origTrim = String(it.text || '').trim();
+        const outTrim = String(out || '').trim();
+        if (outTrim === origTrim) {
+          // Create blocked element according to BLOCK_MODE
+          const span = document.createElement("span");
+          span.dataset.detoxified = "1";
+          span.dataset.blocked = "1";
+          span.dataset.textId = it.id;
+          span.dataset.original = it.text;
 
-        const span = document.createElement("span");
-        span.textContent = out;
-        span.dataset.detoxified = "1";
-        span.dataset.textId = it.id;
+          if (BLOCK_MODE === 'remove') {
+            span.textContent = '[Blocked content]';
+            span.setAttribute('aria-hidden', 'true');
+          } else if (BLOCK_MODE === 'blur') {
+            span.textContent = out;
+            span.style.filter = 'blur(6px)';
+            span.style.pointerEvents = 'none';
+            span.setAttribute('aria-hidden', 'true');
+          } else {
+            // default: color-match to parent background to make unreadable
+            span.textContent = out;
+            try {
+              const bg = (it.parent && window.getComputedStyle(it.parent).backgroundColor) || window.getComputedStyle(document.body).backgroundColor || '#fff';
+              const bgIsTransparent = /^rgba\(0,\s*0,\s*0,\s*0\)/i.test(String(bg)) || bg === 'transparent';
+              span.style.color = bgIsTransparent ? '#fff' : bg;
+              span.style.userSelect = 'none';
+              span.setAttribute('aria-hidden', 'true');
+            } catch (e) {}
+          }
 
-        // Insert span at the position of the first original node to preserve DOM flow
-        const firstNode = it.nodes && it.nodes[0];
-        if (firstNode && firstNode.parentNode) {
-          firstNode.parentNode.insertBefore(span, firstNode);
+          const firstNode = it.nodes && it.nodes[0];
+          if (firstNode && firstNode.parentNode) {
+            firstNode.parentNode.insertBefore(span, firstNode);
+          } else {
+            it.parent.appendChild(span);
+          }
+          it.nodes.forEach((n) => n.remove());
+          it.parent.dataset.detoxified = "1";
+          it.parent.dataset.textId = it.id;
+          textElements.set(String(it.id), it.parent);
+
+          sendBg({
+            type: "logDetox",
+            payload: {
+              id: it.id,
+              original: it.text,
+              detoxified: out,
+              blocked: true,
+              attempts: attempts[index] || 0,
+              error: errors[index] || null,
+              timestamp: new Date().toISOString(),
+            },
+          });
         } else {
-          it.parent.appendChild(span);
+          const span = document.createElement("span");
+          span.textContent = out;
+          span.dataset.detoxified = "1";
+          span.dataset.textId = it.id;
+
+          const firstNode = it.nodes && it.nodes[0];
+          if (firstNode && firstNode.parentNode) {
+            firstNode.parentNode.insertBefore(span, firstNode);
+          } else {
+            it.parent.appendChild(span);
+          }
+
+          it.nodes.forEach((n) => n.remove());
+
+          it.parent.dataset.detoxified = "1";
+          it.parent.dataset.textId = it.id;
+          textElements.set(String(it.id), it.parent);
+
+          sendBg({
+            type: "logDetox",
+            payload: {
+              id: it.id,
+              original: it.text,
+              detoxified: out,
+              blocked: false,
+              attempts: attempts[index] || 0,
+              error: errors[index] || null,
+              timestamp: new Date().toISOString(),
+            },
+          });
         }
-
-        // Remove all original nodes after inserting the replacement
-        it.nodes.forEach((n) => n.remove());
-
-        it.parent.dataset.detoxified = "1";
-        it.parent.dataset.textId = it.id;
-        textElements.set(String(it.id), it.parent);
-
-        sendBg({
-          type: "logDetox",
-          payload: {
-            id: it.id,
-            original: it.text,
-            detoxified: out,
-            attempts: attempts[index] || 0,
-            error: errors[index] || null,
-            timestamp: new Date().toISOString(),
-          },
-        });
 
         sendBg({
           type: "logDetected",
@@ -404,6 +461,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#ffecec";
           break;
+        case "blocked":
+          try {
+            // Prefer applying to the inserted detox span if present
+            const span = el.querySelector(`[data-text-id="${msg.id}"]`);
+            const target = span || el;
+            const bg = (el && window.getComputedStyle(el).backgroundColor) || window.getComputedStyle(document.body).backgroundColor || '#fff';
+            const bgIsTransparent = /^rgba\(0,\s*0,\s*0,\s*0\)/i.test(String(bg)) || bg === 'transparent';
+            target.style.color = bgIsTransparent ? '#fff' : bg;
+            target.style.userSelect = 'none';
+            try { target.dataset.blocked = '1'; } catch (e) {}
+          } catch (e) {}
+          break;
         case "ungenerated":
           el.style.transition = "background-color 0.2s ease";
           el.style.backgroundColor = "#f3e6d6";
@@ -417,8 +486,55 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const el = textElements.get(String(msg.id));
     if (el) {
       el.style.backgroundColor = "";
+      try {
+        // remove color and blocked markers if present
+        const span = el.querySelector(`[data-text-id="${msg.id}"]`);
+        const target = span || el;
+        target.style.color = "";
+        try { target.removeAttribute('data-blocked'); } catch (e) {}
+      } catch (e) {}
       try { el.removeAttribute('data-highlighted'); } catch (e) {}
     }
+  }
+
+  if (msg.type === 'unblock') {
+    const id = String(msg.id);
+    const el = textElements.get(id);
+    if (el) {
+      try {
+        const span = el.querySelector(`[data-text-id="${id}"]`) || el.querySelector('[data-blocked="1"]') || el.querySelector('[data-detoxified="1"]');
+        if (span) {
+          const original = msg.original || span.dataset?.original || span.textContent || '';
+          const tn = document.createTextNode(original);
+          span.parentNode.replaceChild(tn, span);
+          try { el.removeAttribute('data-detoxified'); } catch (e) {}
+          try { el.removeAttribute('data-highlighted'); } catch (e) {}
+        }
+      } catch (e) {}
+    }
+    sendResponse && sendResponse({ success: true });
+    return true;
+  }
+
+  if (msg.type === 'unblockMultiple') {
+    const list = Array.isArray(msg.ids) ? msg.ids : [];
+    for (const rawId of list) {
+      const id = String(rawId);
+      const el = textElements.get(id);
+      if (!el) continue;
+      try {
+        const span = el.querySelector(`[data-text-id="${id}"]`) || el.querySelector('[data-blocked="1"]') || el.querySelector('[data-detoxified="1"]');
+        if (span) {
+          const original = (msg.originals && msg.originals[String(id)]) || span.dataset?.original || span.textContent || '';
+          const tn = document.createTextNode(original);
+          span.parentNode.replaceChild(tn, span);
+          try { el.removeAttribute('data-detoxified'); } catch (e) {}
+          try { el.removeAttribute('data-highlighted'); } catch (e) {}
+        }
+      } catch (e) {}
+    }
+    sendResponse && sendResponse({ success: true });
+    return true;
   }
 
   if (msg.type === 'checkHighlights') {

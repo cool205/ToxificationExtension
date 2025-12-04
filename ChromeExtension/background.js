@@ -324,6 +324,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           id: e.id ?? null,
           original: e.original,
           detoxified: e.detoxified,
+          blocked: e.blocked === true,
           attempts: e.attempts,
           error: e.error,
           tabId: e.tabId ?? null,

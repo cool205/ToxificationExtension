@@ -44,6 +44,7 @@
     saveBtn: document.getElementById('saveBtn'),
     resetBtn: document.getElementById('resetBtn'),
     clearCacheBtn: document.getElementById('clearCacheBtn'),
+    blockMode: document.getElementById('blockMode'),
     status: document.getElementById('status')
   };
 
@@ -62,6 +63,8 @@
     els.cacheTtlVal.textContent = settings.CACHE_TTL_MINUTES;
     els.logCap.value = settings.LOG_CAP;
     els.logCapVal.textContent = settings.LOG_CAP;
+    // blocking mode
+    els.blockMode.value = settings.BLOCK_MODE || 'colormatch';
   }
 
   function readInputs(){
@@ -71,7 +74,8 @@
       MAX_BATCH_SIZE: Number(els.batchSize.value),
       DETOX_CONCURRENCY: Number(els.concurrency.value),
       CACHE_TTL_MINUTES: Number(els.cacheTtl.value),
-      LOG_CAP: Number(els.logCap.value)
+      LOG_CAP: Number(els.logCap.value),
+      BLOCK_MODE: els.blockMode.value
     };
   }
 

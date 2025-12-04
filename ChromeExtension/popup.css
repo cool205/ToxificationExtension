@@ -91,7 +91,13 @@ body {
 .status-toxic { background: #ffecec; color: #b30000; }
 .status-ungenerated { background: #f3e6d6; color: #6b3f00; }
 
+.status-blocked { background: #8b0000; color: #fff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; font-size: 12px; margin-left: 8px; }
+
+.blocked-text { user-select: none; }
+
 .meta { margin-top: 6px; font-size: 11px; color: #666; }
 
 .original-text { text-decoration: line-through; color: #666; font-size: 12px; margin-bottom: 6px; }
 .regen-text { font-weight: 600; color: #222; font-size: 13px; }
+.blocked-note { color: #8b0000; font-size: 12px; margin-top: 6px; font-weight: 600; }
+.unblock-btn { margin-left: 8px; padding: 3px 8px; font-size: 12px; }

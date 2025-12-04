@@ -100,12 +100,15 @@ async function loadAndRender() {
     else if (item.isToxic === false) status = 'non-toxic';
     else if (item.isToxic === true) {
       const d = id ? detoxById.get(id) : detoxByText.get(String(text));
-      status = d ? 'toxic' : 'ungenerated';
+      if (d) {
+        status = d.blocked ? 'blocked' : 'toxic';
+      } else {
+        status = 'ungenerated';
+      }
     }
     return { item, id, text, status };
   });
-
-  const order = { toxic: 0, 'non-toxic': 1, unclassified: 2, ungenerated: 3 };
+  const order = { blocked: 0, toxic: 1, 'non-toxic': 2, unclassified: 3, ungenerated: 4 };
   itemsWithStatus.sort((a, b) => (order[a.status] - order[b.status]));
 
   for (const entry of itemsWithStatus) {
@@ -116,9 +119,15 @@ async function loadAndRender() {
 
     const badge = document.createElement('span');
     badge.className = `status-badge status-${status}`;
-    // Friendly badge label
+    // Friendly badge label (special case for blocked)
     const labelMap = { 'toxic': 'Toxic', 'non-toxic': 'Non-toxic', 'unclassified': 'Unclassified', 'ungenerated': 'Ungenerated' };
-    badge.textContent = labelMap[status] || String(status).toUpperCase();
+    if (status === 'blocked') {
+      badge.textContent = '●';
+      badge.title = 'Blocked (made unreadable)';
+      badge.classList.add('status-blocked');
+    } else {
+      badge.textContent = labelMap[status] || String(status).toUpperCase();
+    }
 
     const main = document.createElement('div');
     // If toxic and we have a regenerated (detoxified) version, show both original and regenerated
@@ -135,6 +144,16 @@ async function loadAndRender() {
 
       main.appendChild(originalDiv);
       main.appendChild(regenDiv);
+    } else if (status === 'blocked') {
+      const originalDiv = document.createElement('div');
+      originalDiv.className = 'original-text';
+      originalDiv.innerHTML = escapeHtml(text);
+      const note = document.createElement('div');
+      note.className = 'blocked-note';
+      note.textContent = 'Blocked (hidden on page)';
+      main.appendChild(originalDiv);
+      main.appendChild(note);
+      
     } else {
       main.innerHTML = escapeHtml(text);
     }
@@ -143,6 +162,21 @@ async function loadAndRender() {
     meta.className = 'meta';
     const ts = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
     meta.textContent = ts + (id ? ` | id: ${id}` : '');
+
+    // If this item is blocked, add an Unblock button into the meta area
+    if (status === 'blocked') {
+      const unblockBtn = document.createElement('button');
+      unblockBtn.className = 'clear-btn unblock-btn';
+      unblockBtn.textContent = 'Unblock';
+      unblockBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const detoxEntry = (id && detoxById.get(id)) || detoxByText.get(String(text));
+        const original = (detoxEntry && detoxEntry.original) || text;
+        await sendMessageToTab({ type: 'unblock', id, original });
+        setTimeout(loadAndRender, 300);
+      });
+      meta.appendChild(unblockBtn);
+    }
 
     div.appendChild(badge);
     div.appendChild(main);
@@ -160,6 +194,35 @@ async function loadAndRender() {
   if (highlightCheckbox.checked) {
     applyHighlightsToPage();
   }
+}
+
+// Unblock All button handling
+const unblockAllBtn = document.getElementById('unblockAll');
+if (unblockAllBtn) {
+  unblockAllBtn.addEventListener('click', async () => {
+    // fetch logs and active tab to determine blocked items for this page
+    const res = await sendToBackground({ type: 'getDetoxLog' });
+    if (!res) return;
+    let pairs = res.pairs || [];
+    const activeTab = await new Promise((resolve) => {
+      try { chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve((tabs && tabs[0]) || null)); }
+      catch (e) { resolve(null); }
+    });
+    const activeTabId = activeTab ? activeTab.id : null;
+    if (activeTabId != null) pairs = pairs.filter(p => p.tabId === activeTabId);
+
+    const ids = [];
+    const originals = {};
+    for (const p of pairs) {
+      if (p.blocked && p.id != null) {
+        ids.push(String(p.id));
+        originals[String(p.id)] = p.original;
+      }
+    }
+    if (ids.length === 0) return;
+    await sendMessageToTab({ type: 'unblockMultiple', ids, originals });
+    setTimeout(loadAndRender, 400);
+  });
 }
 
 // Refresh popup when the active tab changes or finishes loading
@@ -204,7 +267,11 @@ async function applyHighlightsToPage() {
     else if (item.isToxic === false) status = 'non-toxic';
     else if (item.isToxic === true) {
       const d = detoxById.get(id) || detoxByText.get(String(item.text));
-      status = d ? 'toxic' : 'ungenerated';
+      if (d) {
+        status = d.blocked ? 'blocked' : 'toxic';
+      } else {
+        status = 'ungenerated';
+      }
     }
 
     await sendMessageToTab({ type: 'applyColor', id, status });

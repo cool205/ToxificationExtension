@@ -45,6 +45,16 @@
       <div class="desc">Maximum number of log entries stored for detections and detox operations.</div>
     </div>
 
+    <div class="control">
+      <label>Blocking Mode:</label>
+      <select id="blockMode">
+        <option value="colormatch">Color-match hide (default)</option>
+        <option value="blur">Blur</option>
+        <option value="remove">Remove content</option>
+      </select>
+      <div class="desc">Choose how the extension blocks unreadable text when detox output is identical to the original. <strong>Color-match</strong> attempts to match the element background; <strong>Blur</strong> applies a blur; <strong>Remove</strong> removes the visible text and shows a placeholder in the popup only.</div>
+    </div>
+
     <div class="actions">
       <button id="saveBtn" class="clear-btn">Save</button>
       <button id="resetBtn" class="clear-btn">Reset Defaults</button>
