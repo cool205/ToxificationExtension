@@ -64,6 +64,7 @@ async function loadAndRender() {
 
   const pairs = res.pairs || [];
   let scanned = res.allScanned || [];
+  const unblockList = res.unblockList || [];
 
   // Get active tab id to filter logs for the current page
   const activeTab = await new Promise((resolve) => {
@@ -101,7 +102,8 @@ async function loadAndRender() {
     else if (item.isToxic === true) {
       const d = id ? detoxById.get(id) : detoxByText.get(String(text));
       if (d) {
-        status = d.blocked ? 'blocked' : 'toxic';
+        // Only show as blocked if not in unblockList
+        status = (d.blocked && !unblockList.includes(id)) ? 'blocked' : 'toxic';
       } else {
         status = 'ungenerated';
       }

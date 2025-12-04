@@ -517,6 +517,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       } catch (e) {}
     }
+    // Notify background that this item has been unblocked
+    sendBg({ type: 'markUnblocked', id });
     sendResponse && sendResponse({ success: true });
     return true;
   }
@@ -538,6 +540,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       } catch (e) {}
     }
+    // Notify background that these items have been unblocked
+    sendBg({ type: 'markUnblocked', ids: list });
     sendResponse && sendResponse({ success: true });
     return true;
   }
