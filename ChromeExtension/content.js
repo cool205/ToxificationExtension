@@ -249,7 +249,9 @@ async function flushBatch() {
         const outTrim = String(out || '').trim();
         // Compare normalized forms so small differences (punctuation, case, whitespace)
         // won't prevent detection of identical outputs.
-        if (normalizeForCompare(outTrim) === normalizeForCompare(origTrim)) {
+        const normOrig = normalizeForCompare(origTrim);
+        const normOut = normalizeForCompare(outTrim);
+        if (normOut === normOrig) {
           // Create blocked element according to BLOCK_MODE
           const span = document.createElement("span");
           span.dataset.detoxified = "1";
@@ -301,6 +303,18 @@ async function flushBatch() {
             },
           });
         } else {
+          // Debug: log mismatch between original and detoxified when not blocked
+          try {
+            console.debug('[detox-block-check] NO BLOCK:', {
+              id: it.id,
+              original: origTrim,
+              detoxified: outTrim,
+              normOriginal: normOrig,
+              normDetox: normOut,
+              origLen: origTrim.length,
+              outLen: outTrim.length
+            });
+          } catch (e) {}
           const span = document.createElement("span");
           span.textContent = out;
           span.dataset.detoxified = "1";
