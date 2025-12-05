@@ -399,7 +399,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
           const defaults = {
-            TOXIC_CONFIDENCE_THRESHOLD: 98,
+            TOXIC_CONFIDENCE_THRESHOLD: 99,
             BATCH_DELAY: 100,
             MAX_BATCH_SIZE: 8,
             DETOX_CONCURRENCY: 4,

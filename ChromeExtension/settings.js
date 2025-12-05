@@ -1,6 +1,6 @@
 (function(){
   const defaults = {
-    TOXIC_CONFIDENCE_THRESHOLD: 99,
+    TOXIC_CONFIDENCE_THRESHOLD: 99.0,
     BATCH_DELAY: 100,
     MAX_BATCH_SIZE: 8,
     DETOX_CONCURRENCY: 4,
