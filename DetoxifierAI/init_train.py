@@ -28,13 +28,15 @@ class MetricsLoggerCallback(TrainerCallback):
                 f.write(f"Step {state.global_step} - Loss: {logs['loss']:.4f}\n")
 
 # === Paths and model setup ===
-MODEL_NAME = os.environ.get("BASE_MODEL", "t5-small")
+# Using BART seq2seq model instead of T5 for better performance
+MODEL_NAME = os.environ.get("BASE_MODEL", "facebook/bart-base")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(SCRIPT_DIR, "t5-small-detox-finetuned")
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, "seq2seq-detox-finetuned")
 MAX_LENGTH = 128
 
 print(f"Script directory: {SCRIPT_DIR}")
 print(f"Output directory: {OUTPUT_DIR}")
+print(f"Using model: {MODEL_NAME}")
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)

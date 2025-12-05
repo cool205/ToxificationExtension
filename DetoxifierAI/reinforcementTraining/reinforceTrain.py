@@ -1,8 +1,8 @@
 import json
 from datasets import load_dataset
 from transformers import (
-    T5ForConditionalGeneration,
-    T5Tokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
     TrainingArguments
 )
 from trl import DPOTrainer, DPOConfig
@@ -44,14 +44,14 @@ def filter_valid(example):
 
 def main():
     json_path = "DetoxifierAI/user_preferences.json"
-    model_folder = "DetoxifierAI/t5-small-detox-finetuned"
+    model_folder = "DetoxifierAI/seq2seq-detox-finetuned"
     dataset = load_dataset("json", data_files=json_path)["train"]
     dataset = dataset.map(prepare_record)
     dataset = dataset.filter(filter_valid)
     print("Dataset size after cleaning:", len(dataset))
-    tokenizer = T5Tokenizer.from_pretrained(model_folder)
-    model = T5ForConditionalGeneration.from_pretrained(model_folder)
-    ref_model = T5ForConditionalGeneration.from_pretrained(model_folder)
+    tokenizer = AutoTokenizer.from_pretrained(model_folder)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_folder)
+    ref_model = AutoModelForSeq2SeqLM.from_pretrained(model_folder)
     dataset = dataset.remove_columns(["chosen", "rejected"])
 
     # Now safely rename
