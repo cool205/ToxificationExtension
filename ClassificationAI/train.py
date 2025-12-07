@@ -13,7 +13,7 @@ from torch.optim import AdamW
 # === CONFIG ===
 DATA_FILE = "classificationAI/classifyData.csv"
 MODEL_NAME = "distilbert-base-uncased"
-NUM_EPOCHS = 2
+NUM_EPOCHS = 10
 
 DEFAULT_BATCH_SIZE = 32        # smaller batch size
 DEFAULT_LR = 5e-5              # Hugging Face default
