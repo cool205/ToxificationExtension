@@ -3,7 +3,7 @@ let detectedLog = [];
 const connectedPorts = new Map();
 
 const CONFIG = {
-  API_BASE: "https://TechKid0109-Detox-Extension.hf.space",
+  API_BASE: "https://TechKid0109-Detoxifyr.hf.space",
   TOXIC_CONFIDENCE_THRESHOLD: 99,
   MAX_RETRIES: 4,
   LOG_CAP: 500,
