@@ -182,91 +182,39 @@ async function classifyText(text) {
       return Object.assign({}, cached.result, { cached: true });
     }
 
-    const res = await fetchWithRetry(`${CONFIG.API_BASE}/api/predict/`, {
+    const res = await fetchWithRetry(`${CONFIG.API_BASE}/classify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: [text] })
+      body: JSON.stringify({ text })
     });
 
     if (!res.success) {
       return { success: false, error: res.error, attempts: res.attempts };
     }
 
-    const data = res.json || {};
-    const item = Array.isArray(data.data) ? data.data[0] : data.data || data;
+    const data = res.json;
+    const conf = data?.confidence || {};
+    // Support both old format (LABEL_0/LABEL_1) and new format (non-toxic/toxic)
+    const label0Confidence = conf.LABEL_0 ?? conf['non-toxic'] ?? 0;
+    let toxicConfidence = conf.LABEL_1 ?? conf.toxic ?? 0;
+    const classification = data.classification;
 
-    // Helper: normalize label text to 'toxic' or 'non-toxic'
-    const normalizeLabel = (lbl) => {
-      if (!lbl && typeof lbl !== 'string') return null;
-      const s = String(lbl).toLowerCase();
-      if (s.includes('tox')) return 'toxic';
-      if (s.includes('non') || s.includes('clean')) return 'non-toxic';
-      if (s === 'label_1' || s === '1') return 'toxic';
-      if (s === 'label_0' || s === '0') return 'non-toxic';
-      return s;
-    };
-
-    // extract classification label and a toxic confidence score (0..1)
-    let classificationRaw = null;
-    let toxicConfidence = 0;
-
-    try {
-      if (typeof item === 'string') {
-        classificationRaw = item;
-        toxicConfidence = /tox/i.test(item) ? 1 : 0;
-      } else if (Array.isArray(item)) {
-        // sometimes Gradio returns [label, score] or [[{label,score},...]]
-        if (typeof item[0] === 'string' && typeof item[1] === 'number') {
-          classificationRaw = item[0];
-          toxicConfidence = /tox/i.test(classificationRaw) ? Number(item[1]) : (1 - Number(item[1] || 0));
-        } else if (Array.isArray(item[0]) && item[0].length > 0 && item[0][0].label) {
-          // a list of label objects
-          const found = item[0].find(x => /tox/i.test(String(x.label)));
-          if (found) {
-            classificationRaw = found.label;
-            toxicConfidence = Number(found.score ?? found.value ?? 0);
-          }
-        }
-      } else if (typeof item === 'object' && item !== null) {
-        if (item.label) {
-          classificationRaw = item.label;
-          toxicConfidence = Number(item.score ?? item.confidence ?? item.probability ?? item.value ?? 0);
-          // if confidence is missing but there is a map-like confidence object
-          if ((!toxicConfidence || toxicConfidence === 0) && typeof item.confidences === 'object') {
-            toxicConfidence = Number(item.confidences.toxic ?? item.confidences['LABEL_1'] ?? 0);
-          }
-        } else if (typeof item.toxic === 'number' || typeof item['LABEL_1'] === 'number') {
-          toxicConfidence = Number(item.toxic ?? item['LABEL_1'] ?? 0);
-          classificationRaw = toxicConfidence >= 0.5 ? 'toxic' : 'non-toxic';
-        } else if (typeof item[0] === 'object' && item[0].label) {
-          const found = item.find(x => /tox/i.test(String(x.label)));
-          if (found) {
-            classificationRaw = found.label;
-            toxicConfidence = Number(found.score ?? found.value ?? 0);
-          }
-        } else if (typeof item.probabilities === 'object') {
-          toxicConfidence = Number(item.probabilities.toxic ?? item.probabilities['LABEL_1'] ?? 0);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to parse classification item', e);
-    }
-
-    const classification = normalizeLabel(classificationRaw) || 'non-toxic';
-    // clamp toxicConfidence to [0,1]
-    if (!Number.isFinite(toxicConfidence)) toxicConfidence = 0;
-    toxicConfidence = Math.max(0, Math.min(1, Number(toxicConfidence || 0)));
-
+    // Convert to percentage for consistent comparison
     const toxicPercentage = toxicConfidence * 100;
-    const isToxic = (classification === 'toxic') && toxicPercentage >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD;
 
-    console.log(`[classify] text="${String(text).slice(0,50)}..." classification=${classification} raw=${String(classificationRaw).slice(0,50)} toxic=${toxicPercentage.toFixed(2)}% threshold=${CONFIG.TOXIC_CONFIDENCE_THRESHOLD}% isToxic=${isToxic}`);
+    // Normalize classification to "toxic" or "non-toxic"
+    const isToxic =
+      (classification === "toxic" || classification === "LABEL_1") &&
+      toxicPercentage >= CONFIG.TOXIC_CONFIDENCE_THRESHOLD;
+
+    // Debug logging
+    console.log(`[classify] text="${String(text).slice(0, 50)}..." classification=${classification} toxic=${toxicPercentage.toFixed(2)}% threshold=${CONFIG.TOXIC_CONFIDENCE_THRESHOLD}% isToxic=${isToxic}`);
 
     const result = {
       success: true,
-      classification,
+      classification: data.classification,
       isToxic,
-      confidence: { label0: 1 - toxicConfidence, label1: toxicConfidence },
+      confidence: { label0: label0Confidence, label1: toxicConfidence },
       toxicPercentage,
       attempts: res.attempts
     };
@@ -315,9 +263,9 @@ async function detoxifyTextSingle(text) {
     return { output: text, attempts: r.attempts, error: r.error };
   }
 
-  const json = r.json || {};
   // Support both old format and new format
   let output = text;
+  const json = r.json || {};
   if (Array.isArray(json.detoxified) && json.detoxified.length > 0) {
     output = json.detoxified[0];
   } else if (json.detoxified) {
@@ -326,31 +274,6 @@ async function detoxifyTextSingle(text) {
     output = json.data[0];
   } else if (Array.isArray(json.output) && json.output.length > 0) {
     output = json.output[0];
-  }
-
-  // If using Gradio /api/predict/ the main response is in json.data[0].
-  // Normalize a variety of possible shapes into a string output.
-  try {
-    const jd = r.json || {};
-    const item = Array.isArray(jd.data) ? jd.data[0] : jd.data || jd;
-    if (typeof item === 'string') {
-      output = item;
-    } else if (Array.isArray(item) && item.length > 0 && typeof item[0] === 'string') {
-      output = item[0];
-    } else if (typeof item === 'object' && item !== null) {
-      output = item.generated_text ?? item.text ?? item.output ?? item.detoxified ?? item[0] ?? output;
-      // if output is an array, take first string
-      if (Array.isArray(output) && output.length > 0) output = output[0];
-      if (typeof output !== 'string') {
-        // try to find string fields inside object
-        for (const k of ['generated_text', 'text', 'output', 'detoxified']) {
-          if (typeof item[k] === 'string') { output = item[k]; break; }
-          if (Array.isArray(item[k]) && item[k].length > 0 && typeof item[k][0] === 'string') { output = item[k][0]; break; }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to parse detoxify response', e);
   }
 
   try { detoxCache.set(key, { ts: Date.now(), output });
