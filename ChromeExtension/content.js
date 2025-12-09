@@ -62,7 +62,17 @@ async function classifyTexts(texts) {
     }
     throw new Error(r.error || "classification failed");
   }
-  return r.results;
+  // Ensure returned array aligns with input length
+  const results = Array.isArray(r.results) ? r.results : [];
+  if (results.length !== texts.length) {
+    // pad with non-toxic defaults for missing entries
+    const padded = [];
+    for (let i = 0; i < texts.length; i++) {
+      padded.push(results[i] || { success: false, isToxic: false, error: r.error || null });
+    }
+    return padded;
+  }
+  return results;
 }
 
 async function detoxifyTexts(texts) {
@@ -94,6 +104,8 @@ const mutationQueue = new Set();
 let mutationTimer = null;
 
 // load settings from storage if available
+// Track whether extension is enabled (can be toggled from popup)
+let EXTENSION_ENABLED = true;
 try {
   chrome.storage.local.get(['extSettings'], (res) => {
     const s = res?.extSettings || {};
@@ -131,9 +143,6 @@ try {
 } catch (e) {
   /* ignore if storage not available */
 }
-
-// Track whether extension is enabled (can be toggled from popup)
-let EXTENSION_ENABLED = true;
 
 function hashString(s) {
   let h = 2166136261 >>> 0;
@@ -399,6 +408,7 @@ const isVisible = (el) => {
 };
 
 function scan(root = document.body) {
+  if (!EXTENSION_ENABLED) return;
   createDetoxBadge();
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -443,6 +453,7 @@ function scan(root = document.body) {
 }
 
 const mo = new MutationObserver((mut) => {
+  if (!EXTENSION_ENABLED) return;
   for (const m of mut) {
     for (const node of m.addedNodes) {
       if (node.nodeType === Node.ELEMENT_NODE) {
@@ -453,10 +464,13 @@ const mo = new MutationObserver((mut) => {
   if (mutationTimer) clearTimeout(mutationTimer);
   mutationTimer = setTimeout(processMutationQueue, MUTATION_DEBOUNCE_MS);
 });
-mo.observe(document.body, { childList: true, subtree: true });
+if (typeof document !== 'undefined' && document.body) {
+  try { mo.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+}
 
 function processMutationQueue() {
   mutationTimer = null;
+  if (!EXTENSION_ENABLED) return;
   if (mutationQueue.size === 0) return;
   const roots = Array.from(mutationQueue);
   mutationQueue.clear();
@@ -471,6 +485,7 @@ function processMutationQueue() {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "highlightText") {
+    if (!EXTENSION_ENABLED) { sendResponse && sendResponse({ success: false }); return true; }
     const el = textElements.get(String(msg.id));
     if (el) {
       el.style.outline = "2px solid #0366d6";
@@ -479,6 +494,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "removeHighlight") {
+    if (!EXTENSION_ENABLED) { sendResponse && sendResponse({ success: false }); return true; }
     textElements.forEach((el) => {
       el.style.outline = "";
       el.style.boxShadow = "";
@@ -491,6 +507,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "applyColor") {
+    if (!EXTENSION_ENABLED) { sendResponse && sendResponse({ success: false }); return true; }
     const el = textElements.get(String(msg.id));
     if (el) {
       switch (msg.status) {
@@ -528,6 +545,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === "removeColor") {
+    if (!EXTENSION_ENABLED) { sendResponse && sendResponse({ success: false }); return true; }
     const el = textElements.get(String(msg.id));
     if (el) {
       el.style.backgroundColor = "";
@@ -626,10 +644,12 @@ function restoreAllDetoxified() {
 }
 
 // Initial scan on page load
-scan();
-// schedule quick re-scans to catch dynamic content loading (e.g., Gmail)
-setTimeout(() => { try { scan(); } catch (e) {} }, 300);
-setTimeout(() => { try { scan(); } catch (e) {} }, 1500);
+if (EXTENSION_ENABLED) {
+  scan();
+  // schedule quick re-scans to catch dynamic content loading (e.g., Gmail)
+  setTimeout(() => { if (EXTENSION_ENABLED) try { scan(); } catch (e) {} }, 300);
+  setTimeout(() => { if (EXTENSION_ENABLED) try { scan(); } catch (e) {} }, 1500);
+}
 
 // Retry scanning when page becomes visible or gains focus
 try {

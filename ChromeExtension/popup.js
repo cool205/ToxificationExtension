@@ -8,6 +8,9 @@ const extEnabledCheckbox = document.getElementById('extEnabled');
 const disableNotice = document.getElementById('disableNotice');
 const restoreAllBtn = document.getElementById('restoreAll');
 
+// Track which items currently have their original shown in the popup
+const shownOriginals = new Set();
+
 let scanInterval = 1000; // ms
 let scanTimer = null;
 let nextScanTime = null;
@@ -150,7 +153,7 @@ async function loadAndRender() {
       // original hidden by default; toggled by View Original button
       const originalDiv = document.createElement('div');
       originalDiv.className = 'original-text';
-      originalDiv.style.display = 'none';
+      originalDiv.style.display = shownOriginals.has(id) ? '' : 'none';
       originalDiv.innerHTML = escapeHtml(text);
 
       main.appendChild(regenDiv);
@@ -192,9 +195,11 @@ async function loadAndRender() {
         if (orig.style.display === 'none') {
           orig.style.display = '';
           viewBtn.textContent = 'Hide Original';
+          if (id) shownOriginals.add(id);
         } else {
           orig.style.display = 'none';
           viewBtn.textContent = 'View Original';
+          if (id) shownOriginals.delete(id);
         }
       });
       btnWrap.appendChild(viewBtn);
@@ -210,6 +215,8 @@ async function loadAndRender() {
         // inform background to remove/mark the detox entry so UI updates
         try { await sendToBackground({ type: 'removeDetoxEntry', id }); } catch (e) {}
         // refresh popup view
+        // also clear shownOriginals for this id
+        if (id) shownOriginals.delete(id);
         setTimeout(loadAndRender, 300);
       });
       btnWrap.appendChild(restoreBtn);
@@ -247,6 +254,8 @@ try {
 }
 
 async function applyHighlightsToPage() {
+  // do nothing if extension disabled
+  if (extEnabledCheckbox && !extEnabledCheckbox.checked) return;
   const res = await sendToBackground({ type: 'getDetoxLog' });
   if (!res) return;
   const pairs = res.pairs || [];
@@ -316,6 +325,11 @@ rescanBtn.addEventListener('click', () => {
 });
 
 highlightCheckbox.addEventListener('change', () => {
+  if (extEnabledCheckbox && !extEnabledCheckbox.checked) {
+    // do not allow highlights when extension disabled
+    highlightCheckbox.checked = false;
+    return;
+  }
   if (highlightCheckbox.checked) applyHighlightsToPage();
   else clearHighlightsOnPage();
 });
@@ -342,6 +356,10 @@ if (extEnabledCheckbox) {
     if (s.enabled === false) extEnabledCheckbox.checked = false;
     else extEnabledCheckbox.checked = true;
   });
+
+  // reflect notice visibility
+  if (extEnabledCheckbox.checked) disableNotice.style.display = 'none';
+  else disableNotice.style.display = '';
 
   extEnabledCheckbox.addEventListener('change', async () => {
     const enabled = !!extEnabledCheckbox.checked;
