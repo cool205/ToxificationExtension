@@ -6,6 +6,7 @@ const scannedList = document.getElementById('scanned-list');
 const highlightCheckbox = document.getElementById('highlightOnPage');
 const extEnabledCheckbox = document.getElementById('extEnabled');
 const disableNotice = document.getElementById('disableNotice');
+const restoreAllBtn = document.getElementById('restoreAll');
 
 let scanInterval = 1000; // ms
 let scanTimer = null;
@@ -365,6 +366,43 @@ if (extEnabledCheckbox) {
       // trigger a rescan so extension behavior resumes
       await sendMessageToTab({ type: 'triggerRescan' });
     }
+
+    // Reload all http(s) tabs so page-level DOM artifacts are cleared or re-applied
+    try {
+      chrome.tabs.query({}, (tabs) => {
+        for (const t of (tabs || [])) {
+          try {
+            const url = t.url || '';
+            if (/^https?:\/\//i.test(url)) {
+              try { chrome.tabs.reload(t.id); } catch (e) {}
+            }
+          } catch (e) {}
+        }
+      });
+    } catch (e) {}
+    // refresh popup
+    setTimeout(loadAndRender, 300);
+  });
+}
+
+// Restore All button behavior - restores all items on active tab and clears background entries
+if (restoreAllBtn) {
+  restoreAllBtn.addEventListener('click', async () => {
+    // get active tab id
+    const activeTab = await new Promise((resolve) => {
+      try { chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve((tabs && tabs[0]) || null)); }
+      catch (e) { resolve(null); }
+    });
+    const tabId = activeTab ? activeTab.id : null;
+
+    // instruct content script to restore elements on the page
+    await sendMessageToTab({ type: 'restoreAll' });
+
+    // ask background to remove detox entries for this tab so popup UI refreshes
+    if (tabId != null) {
+      try { await sendToBackground({ type: 'removeDetoxEntriesForTab', tabId }); } catch (e) {}
+    }
+
     // refresh popup
     setTimeout(loadAndRender, 300);
   });

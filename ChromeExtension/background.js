@@ -505,6 +505,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         })();
         return true;
+
+      case 'removeDetoxEntriesForTab':
+        (async () => {
+          try {
+            const tabId = msg.tabId != null ? Number(msg.tabId) : null;
+            if (tabId != null) {
+              // remove detoxLog entries for this tab
+              for (let i = detoxLog.length - 1; i >= 0; i--) {
+                try {
+                  if (detoxLog[i].tabId != null && Number(detoxLog[i].tabId) === tabId) detoxLog.splice(i, 1);
+                } catch (e) {}
+              }
+              // update detectedLog entries for this tab to mark non-toxic
+              for (let i = 0; i < detectedLog.length; i++) {
+                try {
+                  if (detectedLog[i].tabId != null && Number(detectedLog[i].tabId) === tabId) {
+                    detectedLog[i].isToxic = false;
+                    detectedLog[i].toxicPercentage = null;
+                  }
+                } catch (e) {}
+              }
+            }
+            sendResponse({ success: true });
+          } catch (e) {
+            sendResponse({ success: false, error: String(e) });
+          }
+        })();
+        return true;
   }
 });
 
