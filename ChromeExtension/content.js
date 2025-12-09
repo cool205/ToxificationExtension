@@ -53,6 +53,10 @@ async function sendBg(msg) {
 }
 
 async function classifyTexts(texts) {
+  if (!EXTENSION_ENABLED) {
+    // When extension is paused, do not send classification requests; return non-toxic defaults
+    return texts.map(() => ({ success: true, isToxic: false, attempts: 0 }));
+  }
   const r = await sendBg({ type: "classifyText", texts });
   if (!r.success) {
     if (r.error.includes("context invalidated")) {
@@ -76,6 +80,11 @@ async function classifyTexts(texts) {
 }
 
 async function detoxifyTexts(texts) {
+  if (!EXTENSION_ENABLED) {
+    // When paused, do not send detox requests; return inputs as outputs
+    const outputs = texts.map(t => t);
+    return { outputs, attempts: texts.map(() => 0), errors: texts.map(() => null) };
+  }
   const r = await sendBg({ type: "detoxifyText", texts });
   if (!r.success) throw new Error(r.error || "detoxify failed");
   return r;
@@ -165,6 +174,7 @@ function normalizeForCompare(s) {
 }
 
 function enqueue(nodes, text) {
+  if (!EXTENSION_ENABLED) return;
   const parent = nodes[0]?.parentNode;
   if (!parent) return;
   if (parent.dataset.detoxified === "1") return;
@@ -611,12 +621,71 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'extensionEnabled') {
     try {
       EXTENSION_ENABLED = !!msg.enabled;
-      if (!EXTENSION_ENABLED) restoreAllDetoxified();
+      if (!EXTENSION_ENABLED) {
+        // restore page content and show paused overlay
+        try { restoreAllDetoxified(); } catch (e) {}
+        try { showPausedOverlay(); } catch (e) {}
+      } else {
+        try { hidePausedOverlay(); } catch (e) {}
+        // resume scanning
+        try { scan(); } catch (e) {}
+      }
     } catch (e) {}
     sendResponse && sendResponse({ success: true });
     return true;
   }
 });
+
+// Overlay to indicate paused state
+function showPausedOverlay() {
+  try {
+    if (document.getElementById('toxPauseOverlay')) return;
+    const ov = document.createElement('div');
+    ov.id = 'toxPauseOverlay';
+    Object.assign(ov.style, {
+      position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+      background: 'rgba(255,255,255,0.6)', zIndex: '2147483647', display: 'flex',
+      alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto'
+    });
+    const box = document.createElement('div');
+    box.style.background = 'rgba(0,0,0,0.6)';
+    box.style.color = '#fff';
+    box.style.padding = '18px 22px';
+    box.style.borderRadius = '8px';
+    box.style.fontSize = '16px';
+    box.style.maxWidth = '80%';
+    box.style.textAlign = 'center';
+    box.textContent = 'Extension paused — no scanning or network requests are being made.';
+    const btn = document.createElement('button');
+    btn.textContent = 'Resume extension';
+    Object.assign(btn.style, { marginLeft: '12px', padding: '8px 12px', fontSize: '14px', cursor: 'pointer' });
+    btn.addEventListener('click', () => {
+      try {
+        const sKey = 'extSettings';
+        chrome.storage.local.get([sKey], (res) => {
+          const cur = res?.[sKey] || {};
+          cur.enabled = true;
+          chrome.storage.local.set({ [sKey]: cur }, () => {
+            EXTENSION_ENABLED = true;
+            try { hidePausedOverlay(); } catch (e) {}
+            try { scan(); } catch (e) {}
+          });
+        });
+      } catch (e) {}
+    });
+    box.appendChild(document.createElement('div'));
+    box.appendChild(btn);
+    ov.appendChild(box);
+    document.documentElement.appendChild(ov);
+  } catch (e) {}
+}
+
+function hidePausedOverlay() {
+  try {
+    const el = document.getElementById('toxPauseOverlay');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  } catch (e) {}
+}
 
 // Restore helper used internally
 function restoreAllDetoxified() {
@@ -653,9 +722,9 @@ if (EXTENSION_ENABLED) {
 
 // Retry scanning when page becomes visible or gains focus
 try {
-  window.addEventListener('DOMContentLoaded', () => { scan(); });
-  window.addEventListener('load', () => { scan(); });
-  window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scan(); });
-  window.addEventListener('focus', () => { scan(); });
-  window.addEventListener('pageshow', () => { scan(); });
+  window.addEventListener('DOMContentLoaded', () => { if (EXTENSION_ENABLED) scan(); });
+  window.addEventListener('load', () => { if (EXTENSION_ENABLED) scan(); });
+  window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && EXTENSION_ENABLED) scan(); });
+  window.addEventListener('focus', () => { if (EXTENSION_ENABLED) scan(); });
+  window.addEventListener('pageshow', () => { if (EXTENSION_ENABLED) scan(); });
 } catch (e) {}
