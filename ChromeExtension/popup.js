@@ -232,6 +232,16 @@ async function loadAndRender() {
       sendMessageToTab({ type: 'applyColor', id: id, status });
     });
 
+    // Hover in popup should temporarily highlight the element on the page
+    div.addEventListener('mouseenter', () => {
+      if (!id) return;
+      try { if (!(extEnabledCheckbox && !extEnabledCheckbox.checked)) sendMessageToTab({ type: 'highlightText', id }); } catch (e) {}
+    });
+    div.addEventListener('mouseleave', () => {
+      if (!id) return;
+      try { if (!(extEnabledCheckbox && !extEnabledCheckbox.checked)) sendMessageToTab({ type: 'removeHighlight', id }); } catch (e) {}
+    });
+
     scannedList.appendChild(div);
   }
 

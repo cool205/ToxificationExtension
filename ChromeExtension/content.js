@@ -500,15 +500,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (el) {
       el.style.outline = "2px solid #0366d6";
       el.style.boxShadow = "0 0 10px rgba(3,102,214,0.3)";
+      try { el.dataset.highlighted = '1'; } catch (e) {}
     }
   }
 
   if (msg.type === "removeHighlight") {
     if (!EXTENSION_ENABLED) { sendResponse && sendResponse({ success: false }); return true; }
-    textElements.forEach((el) => {
-      el.style.outline = "";
-      el.style.boxShadow = "";
-    });
+    const id = msg.id != null ? String(msg.id) : null;
+    if (id) {
+      const el = textElements.get(id);
+      if (el) {
+        el.style.outline = "";
+        el.style.boxShadow = "";
+        try { el.removeAttribute('data-highlighted'); } catch (e) {}
+      }
+    } else {
+      textElements.forEach((el) => {
+        el.style.outline = "";
+        el.style.boxShadow = "";
+        try { el.removeAttribute('data-highlighted'); } catch (e) {}
+      });
+    }
+    sendResponse && sendResponse({ success: true });
+    return true;
   }
 
   if (msg.type === "triggerRescan") {
