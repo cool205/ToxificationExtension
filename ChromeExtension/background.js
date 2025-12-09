@@ -479,6 +479,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       })();
       return true;
+
+      case 'removeDetoxEntry':
+        (async () => {
+          try {
+            const id = msg.id != null ? String(msg.id) : null;
+            if (id) {
+              // remove detoxLog entries with this id
+              for (let i = detoxLog.length - 1; i >= 0; i--) {
+                if (String(detoxLog[i].id) === id) detoxLog.splice(i, 1);
+              }
+              // update detectedLog to mark non-toxic for that id
+              for (let i = 0; i < detectedLog.length; i++) {
+                try {
+                  if (String(detectedLog[i].id) === id) {
+                    detectedLog[i].isToxic = false;
+                    detectedLog[i].toxicPercentage = null;
+                  }
+                } catch (e) {}
+              }
+            }
+            sendResponse({ success: true });
+          } catch (e) {
+            sendResponse({ success: false, error: String(e) });
+          }
+        })();
+        return true;
   }
 });
 

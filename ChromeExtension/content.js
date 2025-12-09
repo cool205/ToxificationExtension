@@ -97,6 +97,7 @@ let mutationTimer = null;
 try {
   chrome.storage.local.get(['extSettings'], (res) => {
     const s = res?.extSettings || {};
+    if (s.enabled != null) EXTENSION_ENABLED = !!s.enabled;
     if (s.BATCH_DELAY != null) BATCH_DELAY = Number(s.BATCH_DELAY);
     if (s.MAX_BATCH_SIZE != null) MAX_BATCH_SIZE = Number(s.MAX_BATCH_SIZE);
     if (s.MIN_GROUP_CHARS != null) MIN_GROUP_CHARS = Number(s.MIN_GROUP_CHARS);
@@ -110,6 +111,13 @@ try {
     if (area !== 'local') return;
     if (changes.extSettings && changes.extSettings.newValue) {
       const s = changes.extSettings.newValue;
+      if (s.enabled != null) {
+        EXTENSION_ENABLED = !!s.enabled;
+        if (!EXTENSION_ENABLED) {
+          // when disabled, restore originals on the page
+          try { restoreAllDetoxified(); } catch (e) {}
+        }
+      }
       if (s.BATCH_DELAY != null) BATCH_DELAY = Number(s.BATCH_DELAY);
       if (s.MAX_BATCH_SIZE != null) MAX_BATCH_SIZE = Number(s.MAX_BATCH_SIZE);
       if (s.MIN_GROUP_CHARS != null) MIN_GROUP_CHARS = Number(s.MIN_GROUP_CHARS);
@@ -123,6 +131,9 @@ try {
 } catch (e) {
   /* ignore if storage not available */
 }
+
+// Track whether extension is enabled (can be toggled from popup)
+let EXTENSION_ENABLED = true;
 
 function hashString(s) {
   let h = 2166136261 >>> 0;
@@ -319,6 +330,8 @@ async function flushBatch() {
           span.textContent = out;
           span.dataset.detoxified = "1";
           span.dataset.textId = it.id;
+          // keep original on the inserted element so it can be restored later
+          try { span.dataset.original = String(it.text); } catch (e) {}
 
           const firstNode = it.nodes && it.nodes[0];
           if (firstNode && firstNode.parentNode) {
@@ -541,7 +554,76 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     return true;
   }
+
+  // Restore a single detoxified element back to its original text
+  if (msg.type === 'restoreOriginal') {
+    try {
+      const id = String(msg.id);
+      const el = textElements.get(id);
+      if (el) {
+        // find inserted detox span inside element
+        const span = el.querySelector(`[data-text-id="${id}"]`);
+        const original = span?.dataset?.original || span?.getAttribute('data-original') || span?.dataset?.orig || span?.getAttribute('data-orig') || null;
+        const origText = original != null ? original : (msg.original || null);
+        if (origText != null) {
+          // remove inserted span and put original text node back
+          try {
+            if (span && span.parentNode) {
+              const tn = document.createTextNode(origText);
+              span.parentNode.insertBefore(tn, span);
+              span.remove();
+            }
+          } catch (e) {}
+        }
+        try { el.removeAttribute('data-detoxified'); el.removeAttribute('data-text-id'); } catch (e) {}
+      }
+    } catch (e) {}
+    sendResponse && sendResponse({ success: true });
+    return true;
+  }
+
+  // Restore all detoxified elements on the page
+  if (msg.type === 'restoreAll') {
+    try { restoreAllDetoxified(); } catch (e) {}
+    sendResponse && sendResponse({ success: true });
+    return true;
+  }
+
+  // Toggle extension enabled state (popup may instruct content to restore now)
+  if (msg.type === 'extensionEnabled') {
+    try {
+      EXTENSION_ENABLED = !!msg.enabled;
+      if (!EXTENSION_ENABLED) restoreAllDetoxified();
+    } catch (e) {}
+    sendResponse && sendResponse({ success: true });
+    return true;
+  }
 });
+
+// Restore helper used internally
+function restoreAllDetoxified() {
+  try {
+    // find all inserted spans with data-detoxified
+    const spans = document.querySelectorAll('[data-detoxified="1"]');
+    for (const span of spans) {
+      const id = span.dataset.textId;
+      const original = span.dataset.original || span.getAttribute('data-original') || null;
+      if (original != null) {
+        try {
+          const tn = document.createTextNode(original);
+          span.parentNode.insertBefore(tn, span);
+          span.remove();
+        } catch (e) {}
+      } else {
+        // fallback: just remove the inserted span
+        try { span.remove(); } catch (e) {}
+      }
+      if (id && textElements.has(String(id))) {
+        try { textElements.get(String(id)).removeAttribute('data-detoxified'); textElements.get(String(id)).removeAttribute('data-text-id'); } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
 
 // Initial scan on page load
 scan();

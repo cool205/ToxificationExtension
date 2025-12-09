@@ -4,6 +4,8 @@ const rescanBtn = document.getElementById('rescan');
 const scanStatus = document.getElementById('scanStatus');
 const scannedList = document.getElementById('scanned-list');
 const highlightCheckbox = document.getElementById('highlightOnPage');
+const extEnabledCheckbox = document.getElementById('extEnabled');
+const disableNotice = document.getElementById('disableNotice');
 
 let scanInterval = 1000; // ms
 let scanTimer = null;
@@ -136,30 +138,36 @@ async function loadAndRender() {
     }
 
     const main = document.createElement('div');
-    // If toxic and we have a regenerated (detoxified) version, show both original and regenerated
+    // If toxic and we have a regenerated (detoxified) version, show altered text only by default
     if (status === 'toxic') {
       const detoxEntry = (id && detoxById.get(id)) || detoxByText.get(String(text));
-      const originalDiv = document.createElement('div');
-      originalDiv.className = 'original-text';
-      originalDiv.innerHTML = escapeHtml(text);
-
       const regenDiv = document.createElement('div');
       regenDiv.className = 'regen-text';
-      const regenText = (detoxEntry && detoxEntry.detoxified) || (detoxEntry && detoxEntry.detoxified === undefined && detoxEntry.detoxified) || '';
-      regenDiv.innerHTML = escapeHtml(regenText || '');
+      const regenText = (detoxEntry && detoxEntry.detoxified) || '';
+      regenDiv.innerHTML = escapeHtml(regenText || '(no detox output)');
 
-      main.appendChild(originalDiv);
-      main.appendChild(regenDiv);
-    } else if (status === 'blocked') {
+      // original hidden by default; toggled by View Original button
       const originalDiv = document.createElement('div');
       originalDiv.className = 'original-text';
+      originalDiv.style.display = 'none';
       originalDiv.innerHTML = escapeHtml(text);
-      const note = document.createElement('div');
-      note.className = 'blocked-note';
-      note.textContent = 'Blocked (hidden on page)';
+
+      main.appendChild(regenDiv);
       main.appendChild(originalDiv);
-      main.appendChild(note);
-      
+    } else if (status === 'blocked') {
+      // show blocked placeholder; original hidden by default
+      const blockedDiv = document.createElement('div');
+      blockedDiv.className = 'blocked-note';
+      blockedDiv.textContent = 'Blocked (hidden on page)';
+
+      const originalDiv = document.createElement('div');
+      originalDiv.className = 'original-text';
+      originalDiv.style.display = 'none';
+      originalDiv.innerHTML = escapeHtml(text);
+
+      main.appendChild(blockedDiv);
+      main.appendChild(originalDiv);
+
     } else {
       main.innerHTML = escapeHtml(text);
     }
@@ -169,8 +177,46 @@ async function loadAndRender() {
     const ts = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
     meta.textContent = ts + (id ? ` | id: ${id}` : '');
 
+    // Per-item buttons: View Original and Restore (for toxic/blocked only)
+    const btnWrap = document.createElement('div');
+    btnWrap.className = 'item-buttons';
+    if (status === 'toxic' || status === 'blocked') {
+      const viewBtn = document.createElement('button');
+      viewBtn.className = 'clear-btn view-original';
+      viewBtn.textContent = 'View Original';
+      viewBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const orig = div.querySelector('.original-text');
+        if (!orig) return;
+        if (orig.style.display === 'none') {
+          orig.style.display = '';
+          viewBtn.textContent = 'Hide Original';
+        } else {
+          orig.style.display = 'none';
+          viewBtn.textContent = 'View Original';
+        }
+      });
+      btnWrap.appendChild(viewBtn);
+
+      const restoreBtn = document.createElement('button');
+      restoreBtn.className = 'clear-btn restore-original';
+      restoreBtn.textContent = 'Restore to original';
+      restoreBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (!id) return;
+        // instruct content script to restore this id
+        await sendMessageToTab({ type: 'restoreOriginal', id });
+        // inform background to remove/mark the detox entry so UI updates
+        try { await sendToBackground({ type: 'removeDetoxEntry', id }); } catch (e) {}
+        // refresh popup view
+        setTimeout(loadAndRender, 300);
+      });
+      btnWrap.appendChild(restoreBtn);
+    }
+
     div.appendChild(badge);
     div.appendChild(main);
+    div.appendChild(btnWrap);
     div.appendChild(meta);
 
     div.addEventListener('click', () => {
@@ -284,6 +330,43 @@ if (openSettingsBtn) {
       // fallback: open in same popup (not ideal)
       window.open('settings.html', '_blank');
     }
+  });
+}
+
+// Handle extension enabled toggle
+if (extEnabledCheckbox) {
+  // initialize from storage
+  chrome.storage.local.get(['extSettings'], (res) => {
+    const s = res?.extSettings || {};
+    if (s.enabled === false) extEnabledCheckbox.checked = false;
+    else extEnabledCheckbox.checked = true;
+  });
+
+  extEnabledCheckbox.addEventListener('change', async () => {
+    const enabled = !!extEnabledCheckbox.checked;
+    // persist setting
+    try {
+      const cur = (await sendToBackground({ type: 'noop_get_settings' })) || {};
+    } catch (e) {}
+    const s = await new Promise((resolve) => chrome.storage.local.get(['extSettings'], (r) => resolve(r?.extSettings || {})));
+    s.enabled = enabled;
+    chrome.storage.local.set({ extSettings: s }, () => {});
+
+    // notify content script in active tab to either restore or allow behavior
+    await sendMessageToTab({ type: 'extensionEnabled', enabled });
+
+    if (!enabled) {
+      // advise reload for full restore
+      disableNotice.style.display = '';
+      // attempt to restore elements right away
+      await sendMessageToTab({ type: 'restoreAll' });
+    } else {
+      disableNotice.style.display = 'none';
+      // trigger a rescan so extension behavior resumes
+      await sendMessageToTab({ type: 'triggerRescan' });
+    }
+    // refresh popup
+    setTimeout(loadAndRender, 300);
   });
 }
 
