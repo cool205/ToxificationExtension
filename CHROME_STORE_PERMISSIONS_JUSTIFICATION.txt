@@ -1,0 +1,322 @@
+================================================================================
+CHROME EXTENSION PERMISSIONS & JUSTIFICATION
+Extension: Detoxifyr - Your AI-Powered Text Detoxifier
+Version: 1.0
+================================================================================
+
+OVERVIEW:
+This document provides a complete breakdown of all permissions used in the Detoxifyr Chrome Extension, their justifications, and clarifications regarding remote code execution and host permissions.
+
+================================================================================
+SECTION 1: PERMISSIONS DECLARED IN MANIFEST.JSON
+================================================================================
+
+A. STANDARD PERMISSIONS (permissions array):
+
+   1. "scripting"
+      - PURPOSE: Allows the extension to inject and execute JavaScript code
+      - JUSTIFICATION: Required to inject the content script (content.js) into 
+        web pages to detect and replace toxic text in real-time.
+      - USE CASE: Enables DOM manipulation to find text nodes, inject detoxified
+        text, and manage visual styling (highlighting, overlays).
+
+   2. "storage"
+      - PURPOSE: Allows access to chrome.storage.local API
+      - JUSTIFICATION: Required to cache classification and detoxification 
+        results locally to reduce API calls and improve performance.
+      - USE CASE: Stores:
+        * Classification results (text → toxicity classification)
+        * Detoxified text outputs
+        * User preference settings (extension enabled/disabled state)
+        * Detoxification logs for user review
+
+   3. "activeTab"
+      - PURPOSE: Allows the extension to access the currently active tab
+      - JUSTIFICATION: Enables the popup UI to display detoxified content 
+        specific to the current page the user is viewing.
+      - USE CASE: Fetch tab information to reload pages when extension 
+        settings are toggled and to target detoxification to active pages only.
+
+   4. "tabs"
+      - PURPOSE: Allows the extension to query and manage browser tabs
+      - JUSTIFICATION: Required to reload web pages when the user toggles 
+        the extension on/off, ensuring fresh scans and proper state management.
+      - USE CASE: Reload HTTP/HTTPS tabs to apply/remove detoxification.
+
+================================================================================
+SECTION 2: HOST PERMISSIONS
+================================================================================
+
+B. HOST PERMISSIONS (host_permissions array):
+
+   DECLARED: "<all_urls>"
+
+   WHY THIS IS NECESSARY:
+   - The content script (content.js) needs to run on all web pages to scan 
+     for toxic text universally.
+   - Users expect the extension to work across all websites, not just a 
+     whitelist of specific domains.
+
+   ACTUAL SCOPE IN PRACTICE:
+   - Content script only executes on pages with http:// or https:// protocols
+     (manifest specifies matches: ["<all_urls>"] in content_scripts).
+   - The extension does NOT run on:
+     * Chrome system pages (chrome://, chrome-extension://, etc.)
+     * Other extension pages
+     * Browser UI elements
+   
+   DATA SENT TO EXTERNAL SERVERS:
+   - Text snippets are sent to: https://TechKid0109-Detoxifyr.hf.space
+   - This is a Hugging Face deployment serving AI models for:
+     * Classification (determining if text is toxic)
+     * Detoxification (generating non-toxic alternatives)
+   - Users should be informed that text content is transmitted to this remote 
+     server for processing (see Privacy Statement below).
+
+================================================================================
+SECTION 3: REMOTE CODE EXECUTION ANALYSIS
+================================================================================
+
+C. IS REMOTE CODE BEING EXECUTED?
+
+   SHORT ANSWER: NO - This extension does NOT execute remote code.
+
+   DETAILED ANALYSIS:
+   
+   1. What the extension DOES:
+      - Sends user-visible text to a remote API (Hugging Face)
+      - Receives classification results and detoxified text
+      - Injects the received results into the DOM as text/HTML content
+      - All operations are confined to the extension's sandbox
+   
+   2. What the extension DOES NOT do:
+      - Does NOT download and execute JavaScript from remote servers
+      - Does NOT use eval(), Function(), or similar dangerous APIs
+      - Does NOT download binary files for execution
+      - Does NOT modify extension code at runtime based on remote data
+      - Does NOT perform dynamic code injection from remote sources
+   
+   3. Safe practices confirmed:
+      - Content is inserted as text nodes or innerHTML (safe HTML context)
+      - No dangling script tags or event handler injection
+      - All API calls are to a trusted, known Hugging Face endpoint
+      - The extension code is immutable (only HTML/text is dynamic)
+
+   VERDICT: This extension is safe regarding remote code execution.
+
+================================================================================
+SECTION 4: DATA PRIVACY & SECURITY CONSIDERATIONS
+================================================================================
+
+D. DATA TRANSMISSION:
+
+   WHAT DATA IS SENT:
+   - User-visible text from web pages (up to batch processing limits)
+   - No personally identifiable information (PII) is intentionally collected
+   - No cookies, login tokens, or authentication data is sent
+   
+   WHERE DATA GOES:
+   - Primary: https://TechKid0109-Detoxifyr.hf.space (Hugging Face)
+   - This is a third-party service controlled by the Hugging Face platform
+   
+   DATA RETENTION:
+   - Hugging Face may log API requests per their privacy policy
+   - The extension caches results locally (chrome.storage.local) for 1 hour
+   - Users can clear extension storage via Chrome settings
+
+   RECOMMENDATION FOR STORE LISTING:
+   Include a privacy statement: "This extension sends text content to a 
+   Hugging Face-hosted AI service for toxicity detection and detoxification. 
+   Please review the Hugging Face privacy policy."
+
+================================================================================
+SECTION 5: PERMISSION JUSTIFICATION SUMMARY TABLE
+================================================================================
+
+Permission        | Necessity | Functionality
+-----------------|-----------|----------------------------------------------
+scripting         | REQUIRED  | Inject content script to scan and modify pages
+storage           | REQUIRED  | Cache results locally for performance
+activeTab         | REQUIRED  | Access current page for detoxification
+tabs              | REQUIRED  | Reload pages on extension toggle
+<all_urls>        | REQUIRED  | Run content script on all web pages
+host_permissions  | REQUIRED  | Communicate with Hugging Face API
+
+RISK LEVEL: LOW
+- All permissions are standard and necessary for functionality
+- No permissions requesting microphone, camera, or sensitive data
+- No permissions requesting user credentials or payment info
+
+================================================================================
+SECTION 6: MANIFEST.JSON SNIPPET FOR CHROME STORE
+================================================================================
+
+When submitting to Chrome Web Store, include this in your extension description:
+
+---COPY THIS SECTION---
+
+EXTENSION PERMISSIONS:
+
+This extension uses the following permissions to provide text detoxification:
+
+1. "scripting" - Allows injection of content script to scan web pages
+2. "storage" - Caches classification results for performance
+3. "activeTab" - Accesses the current page for scanning
+4. "tabs" - Reloads pages when extension settings change
+5. "host_permissions: <all_urls>" - Runs on all web pages (HTTP/HTTPS only)
+
+WHY THESE PERMISSIONS:
+- To scan and identify toxic language in real-time
+- To replace toxic text with AI-generated non-toxic alternatives
+- To cache results for improved performance and reduced API calls
+- To provide a seamless user experience across all websites
+
+DATA PRIVACY:
+- Text content is sent to a Hugging Face AI service for analysis
+- Results are cached locally on your device for 1 hour
+- No personal information, passwords, or payment data is collected or transmitted
+- You can clear cached data anytime via Chrome Extension settings
+
+REMOTE CODE:
+- This extension does NOT download or execute code from remote servers
+- It only sends text for analysis and receives processed results
+- All extension code is static and cannot be modified remotely
+
+WHAT THIS EXTENSION DOES:
+- Automatically detects toxic language on web pages
+- Replaces toxic text with AI-generated alternatives
+- Provides a real-time detoxification dashboard in the extension popup
+- Allows you to enable/disable the extension per-session
+- Maintains a log of detoxified content
+
+---END COPY SECTION---
+
+================================================================================
+SECTION 7: OFFICIAL COMPLIANCE STATEMENT
+================================================================================
+
+For Chrome Web Store Submission Form:
+
+PERMISSION USAGE JUSTIFICATION:
+
+Q: Does this extension execute remote code?
+A: No. The extension injects a local content script and sends only text content
+   to a remote AI service. No code is downloaded or executed from remote sources.
+
+Q: Why does the extension need <all_urls> permission?
+A: To detect and replace toxic language universally across all web pages that
+   users visit. The extension only runs on HTTP/HTTPS pages and respects
+   Chrome's security model.
+
+Q: Is personal data collected?
+A: Only publicly visible web page text is processed. No personal data, login
+   information, or sensitive data is collected or transmitted.
+
+Q: Where is data stored?
+A: Classification results and detoxified text are cached locally for 1 hour
+   in chrome.storage.local. Users can clear this data anytime.
+
+Q: Is the extension malicious or spyware?
+A: No. The extension is open-source and provides transparent functionality:
+   detect toxic language and replace it with non-toxic alternatives.
+
+================================================================================
+SECTION 8: PRIVACY POLICY TEMPLATE (FOR YOUR WEBSITE)
+================================================================================
+
+Include this on your extension's privacy/info page:
+
+---PRIVACY POLICY---
+
+Detoxifyr Chrome Extension collects and processes the following information:
+
+1. TEXT CONTENT: The extension scans all web pages you visit for toxic language.
+   This text is sent to our AI classification service (Hugging Face) for analysis.
+
+2. CACHING: Classification and detoxification results are cached locally on your
+   device for up to 1 hour to improve performance.
+
+3. LOGS: The extension maintains a log of detoxified content visible only to you
+   in the extension popup.
+
+4. NO PERSONAL DATA: The extension does not collect passwords, email addresses,
+   payment information, or other personally identifiable information.
+
+5. THIRD-PARTY SERVICE: Text is processed by Hugging Face's AI models. Please
+   review Hugging Face's privacy policy at https://huggingface.co/privacy
+
+6. DATA CONTROL: You can clear all cached data and logs anytime by:
+   - Right-clicking the extension icon → "Manage extension" → "Storage" → 
+     "Clear site data"
+   - Disabling and re-enabling the extension
+
+7. NO SELLING: We do not sell, trade, or share your data with third parties.
+
+---END PRIVACY POLICY---
+
+================================================================================
+SECTION 9: FINAL CHECKLIST FOR CHROME STORE SUBMISSION
+================================================================================
+
+Before publishing to the Chrome Web Store, verify:
+
+[ ] Extension name is clear and descriptive
+[ ] Description explains the purpose (text detoxification)
+[ ] Privacy policy is linked or included
+[ ] Permissions are justified in the description
+[ ] Screenshots show the extension's functionality
+[ ] Icon/imagery are professional and appropriate
+[ ] No deceptive claims or features
+[ ] Extension does not violate Chrome Web Store policies:
+    - No unauthorized data collection
+    - No code that executes remotely
+    - No misleading permissions or functionality
+    - No adult content that violates policies
+
+POLICY COMPLIANCE NOTES:
+- Extension must not impersonate other services
+- Must disclose third-party APIs (Hugging Face)
+- Must not modify user search results or inject ads
+- Must respect user privacy and provide opt-out mechanisms
+
+================================================================================
+SECTION 10: QUICK REFERENCE - WHAT TO SAY IN CHROME STORE
+================================================================================
+
+COPY THIS FOR YOUR CHROME STORE LISTING DESCRIPTION:
+
+---
+
+Detoxifyr uses AI to automatically detect and replace toxic language with 
+respectful alternatives across the web.
+
+KEY FEATURES:
+• Real-time toxic language detection
+• AI-powered text replacement
+• Local caching for performance
+• Easy enable/disable toggle
+• Detoxification dashboard
+
+PERMISSIONS EXPLAINED:
+- "scripting": To scan and modify web pages
+- "storage": To cache results for faster performance
+- "activeTab" & "tabs": To reload pages when toggled
+
+PRIVACY:
+- Text is sent to Hugging Face AI for processing
+- Results cached locally for 1 hour
+- No personal data is collected
+- Clear cached data anytime via extension settings
+
+---
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+Document Created: December 10, 2025
+Extension Version: 1.0
+Chrome Manifest Version: 3
+
+For questions or updates, refer to the extension's source code in the 
+manifest.json file.

@@ -4,7 +4,6 @@
   "manifest_version": 3,
   "description": "Automatically cleanse the web of toxic language using AI-powered text detoxification.",
   "permissions": [
-    "scripting",
     "storage",
     "activeTab",
     "tabs"
