@@ -1,4 +1,4 @@
-﻿# ToxificationExtension
+﻿# ToxificationExtension (Science Fair)
 
 
 My HuggingFace Space
